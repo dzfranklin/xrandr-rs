@@ -3,6 +3,11 @@ name = "xrandr"
 version = "0.1.0"
 authors = ["Daniel Franklin <daniel@danielzfranklin.org>"]
 edition = "2018"
+description = "Safe rust bindings to xrandr (WIP, read-only so far)"
+license = "MIT"
+repository = "https://github.com/danielzfranklin/xrandr-rs"
+keywords = ["xrandr", "libxrandr", "libxrandr2", "bindings", "linux"]
+categories = ["os::linux-apis", "api-bindings"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
