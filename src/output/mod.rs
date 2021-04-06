@@ -32,6 +32,10 @@ impl Output {
 
         let properties = Self::get_props(handle, xid)?;
 
+        unsafe {
+            xrandr::XRRFreeOutputInfo(info as *const _ as *mut _);
+        }
+
         Ok(Self {
             xid,
             name,
@@ -46,13 +50,21 @@ impl Output {
         let mut props_len = 0;
         let props_data =
             unsafe { xrandr::XRRListOutputProperties(handle.sys.as_ptr(), xid, &mut props_len) };
-        unsafe { slice::from_raw_parts(props_data, props_len as usize) }
+        let props = unsafe { slice::from_raw_parts(props_data, props_len as usize) }
             .iter()
             .map(|prop_id| {
                 let prop = Property::get(handle, xid, *prop_id)?;
                 Ok((prop.name.clone(), prop))
             })
-            .collect()
+            .collect();
+
+        // xrandr doesn't provide a function to free this. The other XRRFree* just call XFree,
+        // so we do that ourselves
+        unsafe {
+            xlib::XFree(props_data as *mut _);
+        }
+
+        props
     }
 
     pub(crate) unsafe fn from_list(
