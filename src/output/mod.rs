@@ -2,7 +2,7 @@ pub mod property;
 
 use crate::{XHandle, XrandrError};
 use indexmap::IndexMap;
-use property::Property;
+use property::{Property, PropertyValue};
 use std::os::raw::c_int;
 use std::{ptr, slice};
 use x11::{xlib, xrandr};
@@ -16,6 +16,20 @@ pub struct Output {
 }
 
 impl Output {
+    /// Get the Output's EDID property, if it exists.
+    ///
+    /// EDID stands for Extended Device Identification Data. You can parse it
+    /// with a crate such as [edid][edid-crate] to get information such as the
+    /// device model or colorspace.
+    ///
+    /// [edid-crate]: https://crates.io/crates/edid
+    pub fn edid(&self) -> Option<Vec<u8>> {
+        self.properties.get("EDID").map(|prop| match &prop.value {
+            PropertyValue::Edid(edid) => edid.clone(),
+            _ => unreachable!("Property with name EDID can only be of type edid"),
+        })
+    }
+
     fn new(handle: &mut XHandle, xid: u64) -> Result<Self, XrandrError> {
         let info = unsafe {
             ptr::NonNull::new(xrandr::XRRGetOutputInfo(
@@ -76,5 +90,18 @@ impl Output {
             .iter()
             .map(|xid| Output::new(handle, *xid))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::XHandle;
+
+    #[test]
+    fn can_get_output_edid() {
+        let outputs = XHandle::open().unwrap().all_outputs().unwrap();
+        let output = outputs.first().unwrap();
+        let edid = output.edid().unwrap();
+        println!("{:?}", edid);
     }
 }
