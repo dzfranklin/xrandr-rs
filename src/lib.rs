@@ -1,3 +1,5 @@
+#![warn(clippy::cargo)]
+
 //! This crate aims to provide safe bindings to libxrandr. It currently supports reading most
 //! monitor properties.
 //!
@@ -109,6 +111,7 @@ impl XHandle {
         Ok(Self { sys })
     }
 
+    /// List every monitor
     pub fn monitors(&mut self) -> Result<Vec<Monitor>, XrandrError> {
         let mut count = 0;
         let infos =
@@ -146,6 +149,7 @@ impl XHandle {
         Ok(list)
     }
 
+    /// List every monitor's outputs
     pub fn all_outputs(&mut self) -> Result<Vec<Output>, XrandrError> {
         let res = self.res()?;
         unsafe { Output::from_list(self, res.outputs, res.noutput) }
@@ -182,6 +186,8 @@ pub struct Monitor {
     pub height_px: i32,
     pub width_mm: i32,
     pub height_mm: i32,
+    /// An Output describes an actual physical monitor or display. A [`Monitor`]
+    /// can have more than one output.
     pub outputs: Vec<Output>,
 }
 
