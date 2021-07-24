@@ -175,6 +175,12 @@ impl XHandle {
     }
 }
 
+impl Drop for XHandle {
+    fn drop(&mut self) {
+        unsafe { xlib::XCloseDisplay(self.sys.as_ptr()); }
+    }
+}
+
 #[derive(Debug)]
 pub struct Monitor {
     pub name: String,
