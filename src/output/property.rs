@@ -4,8 +4,11 @@ use std::{ptr, slice};
 use x11::{xlib, xrandr};
 
 use crate::{atom_name, real_bool, HandleSys, XHandle, XrandrError};
+#[cfg(feature = "serialize")]
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Property {
     pub name: String,
     pub value: PropertyValue,
@@ -214,6 +217,7 @@ impl From<i32> for ValueFormat {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum PropertyValue {
     Edid(Vec<u8>),
     Guid([u8; 16]),
@@ -281,6 +285,7 @@ impl PropertyValue {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum PropertyValues {
     Range(Ranges),
     Supported(Supported),
@@ -309,6 +314,7 @@ impl From<Supported> for PropertyValues {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Ranges {
     Atom(Vec<Range<String>>),
     Integer8(Vec<Range<i8>>),
@@ -320,6 +326,7 @@ pub enum Ranges {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Range<T> {
     pub lower: T,
     pub upper: T,
@@ -385,6 +392,7 @@ impl Ranges {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Supported {
     Atom(Vec<String>),
     Integer8(Vec<i8>),

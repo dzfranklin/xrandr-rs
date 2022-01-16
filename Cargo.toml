@@ -15,3 +15,7 @@ categories = ["os::linux-apis", "api-bindings"]
 thiserror = "1.0.24"
 x11 = { version = "2.18.2", features = ["xlib", "xrandr"] }
 indexmap = "1.6.2"
+serde = {version = "1.0.133", features=["derive"], optional=true}
+
+[features]
+serialize = ["serde", "indexmap/serde-1"]
