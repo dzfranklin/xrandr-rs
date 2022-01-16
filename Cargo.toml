@@ -1,6 +1,6 @@
 [package]
 name = "xrandr"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Daniel Franklin <daniel@danielzfranklin.org>"]
 edition = "2018"
 description = "Safe rust bindings to xrandr (WIP, read-only so far)"
