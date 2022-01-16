@@ -3,11 +3,14 @@ pub mod property;
 use crate::{XHandle, XrandrError};
 use indexmap::IndexMap;
 use property::{Property, PropertyValue};
+#[cfg(feature = "serialize")]
+use serde::{Deserialize, Serialize};
 use std::os::raw::c_int;
 use std::{ptr, slice};
 use x11::{xlib, xrandr};
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Output {
     pub xid: u64,
     pub name: String,

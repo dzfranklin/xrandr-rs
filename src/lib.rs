@@ -86,6 +86,8 @@ use std::os::raw::c_ulong;
 use std::{ptr, slice};
 
 pub use indexmap;
+#[cfg(feature = "serialize")]
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use x11::{xlib, xrandr};
 
@@ -177,11 +179,14 @@ impl XHandle {
 
 impl Drop for XHandle {
     fn drop(&mut self) {
-        unsafe { xlib::XCloseDisplay(self.sys.as_ptr()); }
+        unsafe {
+            xlib::XCloseDisplay(self.sys.as_ptr());
+        }
     }
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Monitor {
     pub name: String,
     pub is_primary: bool,
