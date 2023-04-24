@@ -2,20 +2,43 @@ pub mod property;
 
 use crate::{XHandle, XrandrError};
 use indexmap::IndexMap;
-use property::{Property, PropertyValue};
-#[cfg(feature = "serialize")]
-use serde::{Deserialize, Serialize};
+use property::{Property, Value};
 use std::os::raw::c_int;
 use std::{ptr, slice};
+use x11::xrandr::XRRGetCrtcInfo;
 use x11::{xlib, xrandr};
+
+use crate::CURRENT_TIME;
+use crate::Time;
+use crate::Xid;
+
+#[derive(Debug, Clone, Copy)]
+pub enum Relation {
+    LeftOf,
+    RightOf,
+    Above,
+    Below,
+    SameAs,
+}
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Output {
-    pub xid: u64,
-    pub name: String,
-    /// Properties by name
+    pub xid: Xid,
     pub properties: IndexMap<String, Property>,
+    pub timestamp: Time,
+    pub is_primary: bool,
+    pub crtc: Xid,
+    pub name: String,
+    pub mm_width: u64,
+    pub mm_height: u64,
+    pub connected: bool,
+    pub subpixel_order: u16,
+    pub crtcs: Vec<Xid>,
+    pub clones: Vec<Xid>,
+    pub modes: Vec<Xid>,
+    pub preferred_modes: Vec<Xid>,
+    pub current_mode: Option<Xid>,
 }
 
 impl Output {
@@ -26,37 +49,88 @@ impl Output {
     /// device model or colorspace.
     ///
     /// [edid-crate]: https://crates.io/crates/edid
-    pub fn edid(&self) -> Option<Vec<u8>> {
+    #[must_use] pub fn edid(&self) -> Option<Vec<u8>> {
         self.properties.get("EDID").map(|prop| match &prop.value {
-            PropertyValue::Edid(edid) => edid.clone(),
-            _ => unreachable!("Property with name EDID can only be of type edid"),
+            Value::Edid(edid) => edid.clone(),
+            _ => {
+                unreachable!("Property with name EDID can only be of type edid")
+            }
         })
     }
 
-    fn new(handle: &mut XHandle, xid: u64) -> Result<Self, XrandrError> {
+    pub(crate) fn from_xid(handle: &mut XHandle, xid: u64) 
+    -> Result<Self, XrandrError> 
+    {
+        let res = handle.res()?;
+        let display = handle.sys.as_ptr();
+
         let info = unsafe {
-            ptr::NonNull::new(xrandr::XRRGetOutputInfo(
-                handle.sys.as_ptr(),
-                handle.res()?,
-                xid,
-            ))
-            .ok_or(XrandrError::GetOutputInfo(xid))?
-            .as_ref()
+            ptr::NonNull::new(xrandr::XRRGetOutputInfo(display, res, xid))
+                .ok_or(XrandrError::GetOutputInfo(xid))?
+                .as_ref()
         };
 
-        let name = unsafe { slice::from_raw_parts(info.name as *const u8, info.nameLen as usize) };
-        let name = String::from_utf8_lossy(name).to_string();
+        let crtc = info.crtc;
 
+        let is_primary = xid
+            == unsafe { xrandr::XRRGetOutputPrimary(display, handle.root()) };
+
+        let clones = unsafe { 
+            slice::from_raw_parts(info.clones, info.nclone as usize) 
+        }.to_vec();
+        
+        let modes = unsafe { 
+            slice::from_raw_parts(info.modes, info.nmode as usize) 
+        }.to_vec();
+
+        let preferred_modes = modes[0..info.npreferred as usize].to_vec();
+        
+        let crtcs = unsafe { 
+            slice::from_raw_parts(info.crtcs, info.ncrtc as usize) 
+        }.to_vec();
+        
+        let crtc_info = unsafe {
+            match info.crtc {
+                0 => None,
+                n => Some(*XRRGetCrtcInfo(display, res, n)),
+            }
+        };
+
+        let current_mode = match crtc_info {
+            // TODO: double reference?
+            Some(info) => modes.iter().copied().find(|&m| m == info.mode),
+            None => None,
+        };
+        
+        // Name processing
+        let name_b = unsafe {
+            slice::from_raw_parts(
+                info.name as *const u8,
+                info.nameLen as usize)
+        };
+
+        let name = String::from_utf8_lossy(name_b).to_string();
         let properties = Self::get_props(handle, xid)?;
+        let connected = c_int::from(info.connection) == xrandr::RR_Connected;
 
-        unsafe {
-            xrandr::XRRFreeOutputInfo(info as *const _ as *mut _);
-        }
+        unsafe { xrandr::XRRFreeOutputInfo(info as *const _ as *mut _) };
 
         Ok(Self {
             xid,
-            name,
             properties,
+            timestamp: CURRENT_TIME,
+            is_primary,
+            crtc,
+            name,
+            mm_width: info.mm_width,
+            mm_height: info.mm_height,
+            connected,
+            subpixel_order: info.subpixel_order,
+            crtcs,
+            clones,
+            modes,
+            preferred_modes,
+            current_mode,
         })
     }
 
@@ -65,20 +139,27 @@ impl Output {
         xid: xlib::XID,
     ) -> Result<IndexMap<String, Property>, XrandrError> {
         let mut props_len = 0;
-        let props_data =
-            unsafe { xrandr::XRRListOutputProperties(handle.sys.as_ptr(), xid, &mut props_len) };
-        let props = unsafe { slice::from_raw_parts(props_data, props_len as usize) }
-            .iter()
-            .map(|prop_id| {
-                let prop = Property::get(handle, xid, *prop_id)?;
-                Ok((prop.name.clone(), prop))
-            })
-            .collect();
+        let props_data = unsafe {
+            xrandr::XRRListOutputProperties(
+                handle.sys.as_ptr(),
+                xid,
+                &mut props_len,
+            )
+        };
 
-        // xrandr doesn't provide a function to free this. The other XRRFree* just call XFree,
-        // so we do that ourselves
+        let props =
+            unsafe { slice::from_raw_parts(props_data, props_len as usize) }
+                .iter()
+                .map(|prop_id| {
+                    let prop = Property::get(handle, xid, *prop_id)?;
+                    Ok((prop.name.clone(), prop))
+                })
+                .collect();
+
+        // xrandr doesn't provide a function to free this. The other XRRFree* just call
+        // XFree, so we do that ourselves
         unsafe {
-            xlib::XFree(props_data as *mut _);
+            xlib::XFree(props_data.cast());
         }
 
         props
@@ -91,7 +172,7 @@ impl Output {
     ) -> Result<Vec<Output>, XrandrError> {
         slice::from_raw_parts(data, len as usize)
             .iter()
-            .map(|xid| Output::new(handle, *xid))
+            .map(|xid| Output::from_xid(handle, *xid))
             .collect()
     }
 }

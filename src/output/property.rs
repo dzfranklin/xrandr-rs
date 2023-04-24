@@ -4,15 +4,13 @@ use std::{ptr, slice};
 use x11::{xlib, xrandr};
 
 use crate::{atom_name, real_bool, HandleSys, XHandle, XrandrError};
-#[cfg(feature = "serialize")]
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Property {
     pub name: String,
-    pub value: PropertyValue,
-    pub values: Option<PropertyValues>,
+    pub value: Value,
+    pub values: Option<Values>,
     pub is_immutable: bool,
     pub is_pending: bool,
 }
@@ -58,7 +56,14 @@ impl Property {
         let format = format.into();
         let value_type: ValueType = value_type.into();
 
-        let value = Self::get_value(&mut handle.sys, &name, value_type, format, items_len, prop)?;
+        let value = Self::get_value(
+            &mut handle.sys,
+            &name,
+            value_type,
+            format,
+            items_len,
+            prop,
+        )?;
 
         let info = unsafe {
             ptr::NonNull::new(xrandr::XRRQueryOutputProperty(
@@ -69,7 +74,9 @@ impl Property {
             .ok_or(XrandrError::GetOutputProp(output))?
             .as_ref()
         };
-        let values = Self::get_values(&mut handle.sys, info, value_type, format)?;
+
+        let values =
+            Self::get_values(&mut handle.sys, info, value_type, format)?;
 
         Ok(Self {
             name,
@@ -87,26 +94,28 @@ impl Property {
         format: ValueFormat,
         len: u64,
         data: *mut u8,
-    ) -> Result<PropertyValue, XrandrError> {
+    ) -> Result<Value, XrandrError> {
         if name == "EDID" {
-            return Ok(PropertyValue::from_edid(data, len));
+            return Ok(Value::from_edid(data, len));
         } else if name == "GUID" {
-            return Ok(PropertyValue::from_guid(data));
+            return Ok(Value::from_guid(data));
         }
 
         let value = match value_type {
-            ValueType::Atom => PropertyValue::from_atom(handle, data)?,
+            ValueType::Atom => Value::from_atom(handle, data)?,
             ValueType::Int => match format {
-                ValueFormat::B8 => PropertyValue::from_i8(data, len),
-                ValueFormat::B16 => PropertyValue::from_i16(data, len),
-                ValueFormat::B32 => PropertyValue::from_i32(data, len),
+                ValueFormat::B8 => Value::from_i8(data, len),
+                ValueFormat::B16 => Value::from_i16(data, len),
+                ValueFormat::B32 => Value::from_i32(data, len),
             },
             ValueType::Card => match format {
-                ValueFormat::B8 => PropertyValue::from_c8(data, len),
-                ValueFormat::B16 => PropertyValue::from_c16(data, len),
-                ValueFormat::B32 => PropertyValue::from_c32(data, len),
+                ValueFormat::B8 => Value::from_c8(data, len),
+                ValueFormat::B16 => Value::from_c16(data, len),
+                ValueFormat::B32 => Value::from_c32(data, len),
             },
-            ValueType::Unrecognized(type_sys) => PropertyValue::unrecognized(type_sys, format),
+            ValueType::Unrecognized(type_sys) => {
+                Value::unrecognized(type_sys, format)
+            }
         };
 
         Ok(value)
@@ -117,12 +126,16 @@ impl Property {
         info: &xrandr::XRRPropertyInfo,
         value_type: ValueType,
         format: ValueFormat,
-    ) -> Result<Option<PropertyValues>, XrandrError> {
+    ) -> Result<Option<Values>, XrandrError> {
         let values = if info.num_values > 0 {
-            let values = unsafe { slice::from_raw_parts(info.values, info.num_values as usize) };
+            let values = unsafe {
+                slice::from_raw_parts(info.values, info.num_values as usize)
+            };
             let values = if real_bool(info.range) {
                 match value_type {
-                    ValueType::Atom => Ranges::from_atom(handle, values)?.into(),
+                    ValueType::Atom => {
+                        Ranges::from_atom(handle, values)?.into()
+                    }
 
                     ValueType::Int => match format {
                         ValueFormat::B8 => Ranges::from_i8(values).into(),
@@ -137,12 +150,14 @@ impl Property {
                     },
 
                     ValueType::Unrecognized(type_sys) => {
-                        PropertyValues::unrecognized(type_sys, format)
+                        Values::unrecognized(type_sys, format)
                     }
                 }
             } else {
                 match value_type {
-                    ValueType::Atom => Supported::from_atom(handle, values)?.into(),
+                    ValueType::Atom => {
+                        Supported::from_atom(handle, values)?.into()
+                    }
 
                     ValueType::Int => match format {
                         ValueFormat::B8 => Supported::from_i8(values).into(),
@@ -157,7 +172,7 @@ impl Property {
                     },
 
                     ValueType::Unrecognized(type_sys) => {
-                        PropertyValues::unrecognized(type_sys, format)
+                        Values::unrecognized(type_sys, format)
                     }
                 }
             };
@@ -218,7 +233,7 @@ impl From<i32> for ValueFormat {
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-pub enum PropertyValue {
+pub enum Value {
     Edid(Vec<u8>),
     Guid([u8; 16]),
     Atom(String),
@@ -231,7 +246,7 @@ pub enum PropertyValue {
     Unrecognized { value_type: xlib::Atom, format: i32 },
 }
 
-impl PropertyValue {
+impl Value {
     fn unrecognized(value_type: xlib::Atom, format: ValueFormat) -> Self {
         Self::Unrecognized {
             value_type,
@@ -249,10 +264,15 @@ impl PropertyValue {
         Self::Guid(guid)
     }
 
-    fn from_atom(handle: &mut HandleSys, data: *const u8) -> Result<Self, XrandrError> {
-        let data = unsafe { *(data as *const xlib::Atom) };
+    fn from_atom(
+        handle: &mut HandleSys,
+        data: *const u8,
+    ) -> Result<Self, XrandrError> {
+        // REMOVED: this cast is undefined behaviour
+        // let data = unsafe { *(data.cast::<xlib::Atom>()) };
+        let data = unsafe { u64::from(*data) };
         let name = atom_name(handle, data)?;
-        Ok(PropertyValue::Atom(name))
+        Ok(Value::Atom(name))
     }
 
     fn from_i8(data: *const u8, len: u64) -> Self {
@@ -280,19 +300,19 @@ impl PropertyValue {
     }
 
     unsafe fn reinterpret_as<T: Copy>(data: *const u8, len: u64) -> Vec<T> {
-        slice::from_raw_parts(data as *const T, len as usize).to_vec()
+        slice::from_raw_parts(data.cast::<T>(), len as usize).to_vec()
     }
 }
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-pub enum PropertyValues {
+pub enum Values {
     Range(Ranges),
     Supported(Supported),
     Unrecognized { value_type: xlib::Atom, format: i32 },
 }
 
-impl PropertyValues {
+impl Values {
     fn unrecognized(value_type: xlib::Atom, format: ValueFormat) -> Self {
         Self::Unrecognized {
             value_type,
@@ -301,13 +321,13 @@ impl PropertyValues {
     }
 }
 
-impl From<Ranges> for PropertyValues {
+impl From<Ranges> for Values {
     fn from(value: Ranges) -> Self {
         Self::Range(value)
     }
 }
 
-impl From<Supported> for PropertyValues {
+impl From<Supported> for Values {
     fn from(value: Supported) -> Self {
         Self::Supported(value)
     }
@@ -333,15 +353,20 @@ pub struct Range<T> {
 }
 
 impl Ranges {
-    fn from_atom(handle: &mut HandleSys, values: &[i64]) -> Result<Self, XrandrError> {
+    fn from_atom(
+        handle: &mut HandleSys,
+        values: &[i64],
+    ) -> Result<Self, XrandrError> {
         let values = values
             .chunks_exact(2)
             .map(|values| {
                 let lower = values[0];
                 let upper = values[1];
 
-                let lower = unsafe { *(lower as *const i64 as *const xlib::Atom) };
-                let upper = unsafe { *(upper as *const i64 as *const xlib::Atom) };
+                let lower =
+                    unsafe { *(lower as *const i64).cast::<xlib::Atom>() };
+                let upper =
+                    unsafe { *(upper as *const i64).cast::<xlib::Atom>() };
 
                 let lower = atom_name(handle, lower)?;
                 let upper = atom_name(handle, upper)?;
@@ -383,8 +408,8 @@ impl Ranges {
                 let lower = &values[0];
                 let upper = &values[1];
 
-                let lower = *(lower as *const _ as *const T);
-                let upper = *(upper as *const _ as *const T);
+                let lower = *(lower as *const i64).cast::<T>();
+                let upper = *(upper as *const i64).cast::<T>();
                 Range { lower, upper }
             })
             .collect()
@@ -404,11 +429,15 @@ pub enum Supported {
 }
 
 impl Supported {
-    fn from_atom(handle: &mut HandleSys, values: &[i64]) -> Result<Self, XrandrError> {
+    fn from_atom(
+        handle: &mut HandleSys,
+        values: &[i64],
+    ) -> Result<Self, XrandrError> {
         let values = values
             .iter()
             .map(|val| {
-                let val = unsafe { *(val as *const _ as *const xlib::Atom) };
+                let val = 
+                    unsafe { *((val as *const i64).cast::<xlib::Atom>()) };
                 let val = atom_name(handle, val)?;
                 Ok(val)
             })
@@ -440,10 +469,12 @@ impl Supported {
         Self::Cardinal32(unsafe { Self::reinterpret_as(values) })
     }
 
+    // .map(|val| *(val as *const _ as *const T))
+    // |: try `pointer::cast`, a safer alternative: `(val as *const _).cast::<T>()`
     unsafe fn reinterpret_as<T: Copy>(values: &[i64]) -> Vec<T> {
         values
             .iter()
-            .map(|val| unsafe { *(val as *const _ as *const T) })
+            .map(|val| *(val as *const i64).cast::<T>())
             .collect()
     }
 }
