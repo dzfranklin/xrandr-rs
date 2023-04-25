@@ -12,14 +12,6 @@ use crate::CURRENT_TIME;
 use crate::Time;
 use crate::Xid;
 
-#[derive(Debug, Clone, Copy)]
-pub enum Relation {
-    LeftOf,
-    RightOf,
-    Above,
-    Below,
-    SameAs,
-}
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
@@ -40,6 +32,7 @@ pub struct Output {
     pub preferred_modes: Vec<Xid>,
     pub current_mode: Option<Xid>,
 }
+
 
 impl Output {
     /// Get the Output's EDID property, if it exists.
@@ -94,7 +87,6 @@ impl Output {
         };
 
         let current_mode = match crtc_info {
-            // TODO: double reference?
             Some(info) => modes.iter().copied().find(|&m| m == info.mode),
             None => None,
         };
@@ -109,7 +101,6 @@ impl Output {
         let name = String::from_utf8_lossy(name_b).to_string();
         let properties = Self::get_props(handle, xid)?;
         let connected = c_int::from(info.connection) == xrandr::RR_Connected;
-
 
         let result = Self {
             xid,
@@ -156,8 +147,6 @@ impl Output {
             })
             .collect();
 
-        // xrandr doesn't provide a function to free this. The other XRRFree* just call
-        // XFree, so we do that ourselves
         unsafe { xlib::XFree(props_data.cast()) };
 
         props

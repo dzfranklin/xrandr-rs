@@ -9,12 +9,21 @@ use std::slice;
 use x11::xrandr;
 use std::convert::TryFrom;
 
-#[derive(Copy, Debug, Clone)]
+#[derive(PartialEq, Eq, Copy, Debug, Clone)]
 pub enum Rotation {
     Normal = 1,
     Left = 2,
     Inverted = 4,
     Right = 8,
+}
+
+#[derive(Copy, Debug, Clone)]
+pub enum Relation {
+    LeftOf,
+    RightOf,
+    Above,
+    Below,
+    SameAs,
 }
 
 impl TryFrom<u16> for Rotation {
@@ -31,7 +40,7 @@ impl TryFrom<u16> for Rotation {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Crtc {
     pub xid: Xid,
     pub timestamp: Time,
@@ -44,7 +53,6 @@ pub struct Crtc {
     pub outputs: Vec<Xid>,
     pub rotations: u16,
     pub possible: Vec<Xid>,
-    changed: bool,
 }
 
 
@@ -55,10 +63,10 @@ pub(crate) fn normalize_positions(crtcs: &[Crtc]) -> Vec<Crtc> {
 
     let left = crtcs.iter().map(|p| p.x).min().unwrap();
     let top = crtcs.iter().map(|p| p.y).min().unwrap();
-
-    return crtcs.iter()
+    
+    crtcs.iter()
         .map(|p| p.offset((-left, -top)))
-        .collect();
+        .collect()
 }
 
 
@@ -113,18 +121,24 @@ impl Crtc {
             outputs: outputs.to_vec(),
             rotations: info.rotations,
             possible: possible.to_vec(),
-            changed: false,
         };
         
         unsafe { xrandr::XRRFreeCrtcInfo(info as *const _ as *mut _) };
         Ok(result)
     }
 
+    /// Apply the current fields of this crtc.
+    /// # Examples
+    /// ```
+    /// // Sets new mode on the crtc of some output
+    /// let mut crtc = ScreenResources::new(self)?.crtc(self, output.crtc)?;
+    /// crtc.mode = mode.xid;
+    /// crtc.apply(self)
+    /// ```
+    ///
     pub(crate) fn apply(&mut self, handle: &mut XHandle) 
     -> Result<(), XrandrError> 
     {
-        if !self.changed { return Ok(()); }
-        
         // TODO: do we need to actually pass the null pointer?
         let outputs = match self.outputs.len() {
             0 => std::ptr::null_mut(),
@@ -149,21 +163,21 @@ impl Crtc {
         Ok(())
     }
 
-    // Disable this crtc
+    /// Disable this crtc. Alters some of its fields.
     pub(crate) fn disable(&mut self, handle: &mut XHandle) 
     -> Result<(), XrandrError> 
     {
         self.x = 0;
         self.y = 0;
         self.mode = 0;
-        self.changed = true;
         self.rotation = Rotation::Normal;
         self.outputs.clear();
 
         self.apply(handle)
     }
 
-    // Width and height, accounting for rotation
+
+    /// Width and height, accounting for rotation
     pub fn rot_size(&self, rot: Rotation) -> (u32, u32) {
         let (w, h) = (self.width, self.height);
 
@@ -177,7 +191,7 @@ impl Crtc {
             Rotation::Left | Rotation::Right        => (old_h, old_w),
         };
 
-        eprintln!("Rot size: ({:?}) = {}x{}", self.rotation, x.0, x.1);
+        eprintln!("Rot size: ({:?}) = {}x{}", rot, x.0, x.1);
         x
     }
 
@@ -202,8 +216,6 @@ impl Crtc {
         let mut new = self.clone();
         new.x = x as i32;
         new.y = y as i32;
-
-        if offset.0 != 0 || offset.1 != 0 { new.changed = true; }
         new
     }
 }

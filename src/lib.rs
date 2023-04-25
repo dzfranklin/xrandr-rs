@@ -19,7 +19,7 @@ use x11::{xlib, xrandr};
 
 use crate::crtc::normalize_positions;
 pub use crate::crtc::Crtc;
-pub use crate::crtc::Rotation;
+pub use crate::crtc::{Rotation, Relation};
 pub use crate::mode::Mode;
 pub use output::{
     property::{
@@ -31,7 +31,6 @@ pub use output::{
         Supported,
     },
     Output, 
-    Relation,
 };
 
 mod screen_resources;
@@ -294,6 +293,7 @@ impl XHandle {
     {
         let mut crtc = ScreenResources::new(self)?.crtc(self, output.crtc)?;
         crtc.mode = mode.xid;
+
         crtc.apply(self)
     }
 
@@ -336,14 +336,14 @@ impl XHandle {
     ///     The new crtcs to apply.
     fn apply_new_crtcs(
         &mut self,
-        old_crtcs: &[Crtc],
-        new_crtcs: Vec<Crtc>)
+        old_crtcs: &mut [Crtc],
+        new_crtcs: &mut Vec<Crtc>)
         -> Result<(), XrandrError>
     {
         let new_size = self.new_screen_size(&new_crtcs);
 
         // Disable crtcs that do not fit on the new screen
-        for crtc in old_crtcs {
+        for crtc in old_crtcs.iter_mut() {
             let (max_x, max_y) = crtc.max_coordinates();
             if max_x as i32 > new_size.width 
             || max_y as i32 > new_size.height {
@@ -362,11 +362,16 @@ impl XHandle {
                 new_size.height_mm,
             );
         }
+        eprintln!("Size: {}x{}", new_size.width, new_size.height);
 
         // Move and enable the crtcs
-        for mut crtc in new_crtcs {
-            if crtc.mode != 0 {
-                crtc.apply(self)?; // TODO: only set changed ones?
+        for crtc in new_crtcs {
+            let old_crtc = old_crtcs.iter()
+                .find(|c| c.xid == crtc.xid)
+                .ok_or(XrandrError::NoPreviousStateCrtc(crtc.xid))?;
+
+            if crtc != old_crtc {
+                crtc.apply(self)?;
             }
         }
 
@@ -400,7 +405,7 @@ impl XHandle {
         -> Result<(), XrandrError> 
     {
         let res = ScreenResources::new(self)?;
-        let old_crtcs: Vec<Crtc> = res.crtcs(self)?
+        let mut old_crtcs: Vec<Crtc> = res.crtcs(self)?
             .into_iter()
             .filter(|c| c.mode != 0)
             .collect();
@@ -423,22 +428,16 @@ impl XHandle {
         let (rel_w, rel_h) = rel_mode.rot_size(rel_crtc.rotation);
         let (rel_x, rel_y) = (rel_crtc.x, rel_crtc.y);
 
-        let (new_x, new_y) = match relation {
+        (crtc.x, crtc.y) = match relation {
             Relation::LeftOf  => ( rel_x - w     , rel_y         ),
             Relation::RightOf => ( rel_x + rel_w , rel_y         ),
             Relation::Above   => ( rel_x         , rel_y - h     ),
             Relation::Below   => ( rel_x         , rel_y + rel_h ),
             Relation::SameAs  => ( rel_x         , rel_y         ),
         };
-        
-        // Set new position
-        (crtc.x, crtc.y) = (new_x, new_y);
-        let crtcs = crtcs; // discard mut
-        // And renormalize (top left at (0,0))
-        let new_crtcs = normalize_positions(&crtcs);
 
-        // Apply the new configuration
-        self.apply_new_crtcs(&old_crtcs, new_crtcs)
+        let mut new_crtcs = normalize_positions(&crtcs);
+        self.apply_new_crtcs(&mut old_crtcs, &mut new_crtcs)
     }
 
     // TODO: this seems to not resize the actual window, leaving black space
@@ -463,7 +462,7 @@ impl XHandle {
         output: &Output,
         rotation: &Rotation,
     ) -> Result<(), XrandrError> {
-        let old_crtcs: Vec<Crtc> = ScreenResources::new(self)?
+        let mut old_crtcs: Vec<Crtc> = ScreenResources::new(self)?
             .crtcs(self)?.into_iter()
             .filter(|c| c.mode != 0)
             .collect();
@@ -476,8 +475,7 @@ impl XHandle {
         (crtc.width, crtc.height) = crtc.rot_size(*rotation);
         crtc.rotation = *rotation;
 
-        // Apply the new configuration
-        self.apply_new_crtcs(&old_crtcs, crtcs)
+        self.apply_new_crtcs(&mut old_crtcs, &mut crtcs)
     }
 }
 
@@ -545,7 +543,7 @@ fn atom_name(
 
 #[derive(Error, Debug)]
 pub enum XrandrError {
-    #[error("Failed to open connection to x11. Check out DISPLAY environment variable.")]
+    #[error("Failed to open connection to x11.")]
     Open,
     #[error("Call to XRRGetMonitors failed.")]
     GetMonitors,
@@ -560,6 +558,8 @@ pub enum XrandrError {
     #[error("Could not get info on mode with xid {0}")]
     GetMode(xlib::XID),
     #[error("Could not get info on crtc with xid {0}")]
+    NoPreviousStateCrtc(xlib::XID),
+    #[error("Missing before-state for changing CRTC with xid {0}")]
     GetCrtc(xlib::XID),
     #[error("Call to XRRGetOutputInfo for output with xid {0} failed")]
     GetOutputInfo(xlib::XID),
