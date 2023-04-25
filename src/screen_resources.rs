@@ -132,6 +132,16 @@ impl ScreenResources {
             .collect()
     }
 
+    /// Gets information of only the enabled crtcs
+    /// See also: `self.crtcs()`
+    pub fn enabled_crtcs(&self, handle: &mut XHandle) 
+    -> Result<Vec<Crtc>, XrandrError> 
+    {
+        Ok(self.crtcs(handle)?.into_iter()
+            .filter(|c| c.mode != 0)
+            .collect())
+    }
+
     // TODO: better error documentation
     /// Gets information on crtc with given xid
     ///

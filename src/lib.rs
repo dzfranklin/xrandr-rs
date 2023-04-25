@@ -293,37 +293,10 @@ impl XHandle {
     {
         let mut crtc = ScreenResources::new(self)?.crtc(self, output.crtc)?;
         crtc.mode = mode.xid;
-
         crtc.apply(self)
     }
 
 
-    /// Calculates the screen size that (snugly) fits a set of crtcs
-    fn new_screen_size(&mut self, crtcs: &[Crtc]) -> ScreenSize {
-        const INCH_MM: f32 = 25.4; // The amount of milimeters in an inch
-
-        assert!(!crtcs.is_empty()); // see also: following unwraps
-        let width = crtcs.iter()
-            .map(|p| p.max_coordinates().0)
-            .max()
-            .unwrap() as i32;
-        let height = crtcs.iter()
-            .map(|p| p.max_coordinates().1)
-            .max()
-            .unwrap() as i32;
-
-        // Get the old sizes to calculate the dpi
-        let c_h = unsafe { xlib::XDisplayHeight(self.sys.as_ptr(), 0) };
-        let c_h_mm = unsafe { xlib::XDisplayHeightMM(self.sys.as_ptr(), 0) };
-        
-        // Calculate the new physical size with the dpi and px size
-        let dpi: f32 = (INCH_MM * c_h as f32) / c_h_mm as f32;
-
-        let width_mm = ((INCH_MM * width as f32) / dpi ) as i32;
-		let height_mm = ((INCH_MM * height as f32) / dpi ) as i32;
-
-        ScreenSize{ width, width_mm, height, height_mm }
-    }
 
 
     /// Applies a difference in crtcs
@@ -340,39 +313,23 @@ impl XHandle {
         new_crtcs: &mut Vec<Crtc>)
         -> Result<(), XrandrError>
     {
-        let new_size = self.new_screen_size(&new_crtcs);
+        let new_size = ScreenSize::fitting_crtcs(self, &new_crtcs);
 
         // Disable crtcs that do not fit on the new screen
-        for crtc in old_crtcs.iter_mut() {
-            let (max_x, max_y) = crtc.max_coordinates();
-            if max_x as i32 > new_size.width 
-            || max_y as i32 > new_size.height {
-                crtc.disable(self)?;
+        for c in old_crtcs.iter_mut() {
+            if !new_size.fits_crtc(c) { 
+                c.disable(self)?; 
             }
         }
 
-        // Set the new screen size
-        unsafe {
-            xrandr::XRRSetScreenSize(
-                self.sys.as_ptr(),
-                self.root(),
-                new_size.width,
-                new_size.height,
-                new_size.width_mm,
-                new_size.height_mm,
-            );
-        }
-        eprintln!("Size: {}x{}", new_size.width, new_size.height);
+        new_size.set(self);
 
         // Move and enable the crtcs
-        for crtc in new_crtcs {
-            let old_crtc = old_crtcs.iter()
-                .find(|c| c.xid == crtc.xid)
-                .ok_or(XrandrError::NoPreviousStateCrtc(crtc.xid))?;
-
-            if crtc != old_crtc {
-                crtc.apply(self)?;
-            }
+        for (old_c, new_c) in old_crtcs.iter().zip(new_crtcs.iter_mut()) {
+            assert!(old_c.xid == new_c.xid); 
+            // The below comparison checks whether a given crtc has changed
+            // so we need to make sure we are actually looking at the same crtc
+            if new_c != old_c { new_c.apply(self)? }
         }
 
         Ok(())
@@ -405,17 +362,7 @@ impl XHandle {
         -> Result<(), XrandrError> 
     {
         let res = ScreenResources::new(self)?;
-        let mut old_crtcs: Vec<Crtc> = res.crtcs(self)?
-            .into_iter()
-            .filter(|c| c.mode != 0)
-            .collect();
-        let mut crtcs: Vec<Crtc> = old_crtcs.clone();
-
-        let crtc: &mut Crtc = crtcs.iter_mut()
-            .find(|c| c.xid == output.crtc)
-            .ok_or(XrandrError::GetResources)?;
-        let rel_crtc = res.crtc(self, rel_output.crtc)?;
-
+        
         let mode_id = output.current_mode
             .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
         let rel_mode_id = rel_output.current_mode
@@ -423,6 +370,14 @@ impl XHandle {
 
         let mode = res.mode(mode_id)?;
         let rel_mode = res.mode(rel_mode_id)?;
+
+        let mut old_crtcs: Vec<Crtc> = res.enabled_crtcs(self)?;
+        let mut crtcs: Vec<Crtc> = old_crtcs.clone();
+
+        let crtc: &mut Crtc = crtcs.iter_mut()
+            .find(|c| c.xid == output.crtc)
+            .ok_or(XrandrError::GetResources)?;
+        let rel_crtc = res.crtc(self, rel_output.crtc)?;
 
         let (w, h) = mode.rot_size(crtc.rotation);
         let (rel_w, rel_h) = rel_mode.rot_size(rel_crtc.rotation);
@@ -494,6 +449,56 @@ struct ScreenSize {
     width_mm: i32,
     height: i32,
     height_mm: i32,
+}
+
+impl ScreenSize {
+    /// Sets the screen size in the x backend
+    fn set(&self, handle: &mut XHandle) {
+        unsafe {
+            xrandr::XRRSetScreenSize(
+                handle.sys.as_ptr(),
+                handle.root(),
+                self.width,
+                self.height,
+                self.width_mm,
+                self.height_mm,
+            );
+        }
+    }
+
+    /// True iff the given crtc fits on a screen of this size
+    fn fits_crtc(&self, crtc: &Crtc) -> bool {
+        let (max_x, max_y) = crtc.max_coordinates();
+        max_x as i32 <= self.width && max_y as i32 <= self.height
+
+    }
+
+    /// Calculates the screen size that (snugly) fits a set of crtcs
+    fn fitting_crtcs(handle: &mut XHandle, crtcs: &[Crtc]) -> Self {
+        assert!(!crtcs.is_empty()); // see also: following unwraps
+        const INCH_MM: f32 = 25.4; // The amount of milimeters in an inch
+
+        let width = crtcs.iter()
+            .map(|p| p.max_coordinates().0)
+            .max()
+            .unwrap() as i32;
+        let height = crtcs.iter()
+            .map(|p| p.max_coordinates().1)
+            .max()
+            .unwrap() as i32;
+
+        // Get the old sizes to calculate the dpi
+        let c_h = unsafe { xlib::XDisplayHeight(handle.sys.as_ptr(), 0) };
+        let c_h_mm = unsafe { xlib::XDisplayHeightMM(handle.sys.as_ptr(), 0) };
+        
+        // Calculate the new physical size with the dpi and px count
+        let dpi: f32 = (INCH_MM * c_h as f32) / c_h_mm as f32;
+
+        let width_mm = ((INCH_MM * width as f32) / dpi ) as i32;
+		let height_mm = ((INCH_MM * height as f32) / dpi ) as i32;
+
+        ScreenSize{ width, width_mm, height, height_mm }
+    }
 }
 
 
