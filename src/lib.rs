@@ -345,7 +345,8 @@ impl XHandle {
         // Disable crtcs that do not fit on the new screen
         for crtc in old_crtcs {
             let (max_x, max_y) = crtc.max_coordinates();
-            if max_x as i32 > new_size.width || max_y as i32 > new_size.height {
+            if max_x as i32 > new_size.width 
+            || max_y as i32 > new_size.height {
                 crtc.disable(self)?;
             }
         }

@@ -72,22 +72,19 @@ impl Output {
 
         let crtc = info.crtc;
 
-        let is_primary = xid
-            == unsafe { xrandr::XRRGetOutputPrimary(display, handle.root()) };
+        let is_primary = xid == unsafe { 
+            xrandr::XRRGetOutputPrimary(display, handle.root()) };
 
         let clones = unsafe { 
-            slice::from_raw_parts(info.clones, info.nclone as usize) 
-        }.to_vec();
+            slice::from_raw_parts(info.clones, info.nclone as usize) };
         
         let modes = unsafe { 
-            slice::from_raw_parts(info.modes, info.nmode as usize) 
-        }.to_vec();
+            slice::from_raw_parts(info.modes, info.nmode as usize) };
 
         let preferred_modes = modes[0..info.npreferred as usize].to_vec();
         
         let crtcs = unsafe { 
-            slice::from_raw_parts(info.crtcs, info.ncrtc as usize) 
-        }.to_vec();
+            slice::from_raw_parts(info.crtcs, info.ncrtc as usize) };
         
         let crtc_info = unsafe {
             match info.crtc {
@@ -113,9 +110,8 @@ impl Output {
         let properties = Self::get_props(handle, xid)?;
         let connected = c_int::from(info.connection) == xrandr::RR_Connected;
 
-        unsafe { xrandr::XRRFreeOutputInfo(info as *const _ as *mut _) };
 
-        Ok(Self {
+        let result = Self {
             xid,
             properties,
             timestamp: CURRENT_TIME,
@@ -126,12 +122,15 @@ impl Output {
             mm_height: info.mm_height,
             connected,
             subpixel_order: info.subpixel_order,
-            crtcs,
-            clones,
-            modes,
+            crtcs: crtcs.to_vec(),
+            clones: clones.to_vec(),
+            modes: modes.to_vec(),
             preferred_modes,
             current_mode,
-        })
+        };
+        
+        unsafe { xrandr::XRRFreeOutputInfo(info as *const _ as *mut _) };
+        Ok(result)
     }
 
     fn get_props(
@@ -147,20 +146,19 @@ impl Output {
             )
         };
 
-        let props =
-            unsafe { slice::from_raw_parts(props_data, props_len as usize) }
-                .iter()
-                .map(|prop_id| {
-                    let prop = Property::get(handle, xid, *prop_id)?;
-                    Ok((prop.name.clone(), prop))
-                })
-                .collect();
+        let props_slice = unsafe { 
+            slice::from_raw_parts(props_data, props_len as usize) };
+
+        let props = props_slice.iter()
+            .map(|prop_id| {
+                let prop = Property::get(handle, xid, *prop_id)?;
+                Ok((prop.name.clone(), prop))
+            })
+            .collect();
 
         // xrandr doesn't provide a function to free this. The other XRRFree* just call
         // XFree, so we do that ourselves
-        unsafe {
-            xlib::XFree(props_data.cast());
-        }
+        unsafe { xlib::XFree(props_data.cast()) };
 
         props
     }

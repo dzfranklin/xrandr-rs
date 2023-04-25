@@ -44,6 +44,7 @@ pub struct Crtc {
     pub outputs: Vec<Xid>,
     pub rotations: u16,
     pub possible: Vec<Xid>,
+    changed: bool,
 }
 
 
@@ -51,6 +52,7 @@ pub struct Crtc {
 /// is at (0,0). This is needed after changing positions/rotations.
 pub(crate) fn normalize_positions(crtcs: &[Crtc]) -> Vec<Crtc> {
     assert!(!crtcs.is_empty());
+
     let left = crtcs.iter().map(|p| p.x).min().unwrap();
     let top = crtcs.iter().map(|p| p.y).min().unwrap();
 
@@ -81,7 +83,7 @@ impl Crtc {
     pub fn from_xid(handle: &mut XHandle, xid: Xid) 
     -> Result<Self,XrandrError>
     {
-        let c_i = unsafe {
+        let info = unsafe {
             ptr::NonNull::new(xrandr::XRRGetCrtcInfo(
                 handle.sys.as_ptr(),
                 handle.res()?,
@@ -91,38 +93,44 @@ impl Crtc {
             .as_mut()
         };
 
-
-        let rotation = Rotation::try_from(c_i.rotation)?;
+        let rotation = Rotation::try_from(info.rotation)?;
 
         let outputs = unsafe { 
-            slice::from_raw_parts(c_i.outputs, c_i.noutput as usize) 
-        }.to_vec();
+            slice::from_raw_parts(info.outputs, info.noutput as usize) };
 
         let possible = unsafe { 
-            slice::from_raw_parts(c_i.possible, c_i.npossible as usize) 
-        }.to_vec();
+            slice::from_raw_parts(info.possible, info.npossible as usize) };
 
         let result = Self {
             xid,
-            timestamp: c_i.timestamp,
-            x: c_i.x,
-            y: c_i.y,
-            width: c_i.width,
-            height: c_i.height,
-            mode: c_i.mode,
+            timestamp: info.timestamp,
+            x: info.x,
+            y: info.y,
+            width: info.width,
+            height: info.height,
+            mode: info.mode,
             rotation,
-            outputs,
-            rotations: c_i.rotations,
-            possible,
+            outputs: outputs.to_vec(),
+            rotations: info.rotations,
+            possible: possible.to_vec(),
+            changed: false,
         };
         
-        unsafe { xrandr::XRRFreeCrtcInfo(c_i as *const _ as *mut _) };
+        unsafe { xrandr::XRRFreeCrtcInfo(info as *const _ as *mut _) };
         Ok(result)
     }
 
     pub(crate) fn apply(&mut self, handle: &mut XHandle) 
     -> Result<(), XrandrError> 
     {
+        if !self.changed { return Ok(()); }
+        
+        // TODO: do we need to actually pass the null pointer?
+        let outputs = match self.outputs.len() {
+            0 => std::ptr::null_mut(),
+            _ => self.outputs.as_mut_ptr(),
+        };
+
         unsafe {
             xrandr::XRRSetCrtcConfig(
                 handle.sys.as_ptr(),
@@ -133,7 +141,7 @@ impl Crtc {
                 self.y,
                 self.mode,
                 self.rotation as u16,
-                self.outputs.as_mut_ptr(),
+                outputs,
                 self.outputs.len() as i32,
             );
         }
@@ -141,20 +149,18 @@ impl Crtc {
         Ok(())
     }
 
-    pub(crate) fn disable(&self, handle: &mut XHandle) 
+    // Disable this crtc
+    pub(crate) fn disable(&mut self, handle: &mut XHandle) 
     -> Result<(), XrandrError> 
     {
-        unsafe {
-            xrandr::XRRSetCrtcConfig(
-                handle.sys.as_ptr(),
-                handle.res()?,
-                self.xid, 
-                CURRENT_TIME,
-                0, 0, 0, Rotation::Normal as u16,
-                std::ptr::null_mut(), 0);
-        }
+        self.x = 0;
+        self.y = 0;
+        self.mode = 0;
+        self.changed = true;
+        self.rotation = Rotation::Normal;
+        self.outputs.clear();
 
-        Ok(())
+        self.apply(handle)
     }
 
     // Width and height, accounting for rotation
@@ -175,6 +181,7 @@ impl Crtc {
         x
     }
 
+    /// The most down an dright coordinates that this crtc uses
     pub(crate) fn max_coordinates(&self) -> (u32, u32) {
         assert!(self.x >= 0 && self.y >= 0); // Must be normalized
         // let (w, h) = self.rot_size();
@@ -182,9 +189,11 @@ impl Crtc {
         (self.x as u32 + self.width, self.y as u32 + self.height)
     }
 
+    /// Creates a new Crtc that is offset (.x and .y) fields, by offset param
     pub(crate) fn offset(&self, offset: (i32, i32)) -> Self {
         let x = self.x as i64 + offset.0 as i64;
         let y = self.y as i64 + offset.1 as i64;
+        
 
         assert!(x < i32::MAX as i64 && y < i32::MAX as i64);
         // This should hold after offsetting (normalized)
@@ -193,6 +202,8 @@ impl Crtc {
         let mut new = self.clone();
         new.x = x as i32;
         new.y = y as i32;
+
+        if offset.0 != 0 || offset.1 != 0 { new.changed = true; }
         new
     }
 }
