@@ -76,11 +76,9 @@ impl XHandle {
         Ok(Self { sys })
     }
 
-    pub(crate) fn res<'r, 'h>(
-        &'h mut self,
-    ) -> Result<&'r mut xrandr::XRRScreenResources, XrandrError>
-    where
-        'r: 'h,
+    pub(crate) fn res<'r, 'h>( &'h mut self,) 
+    -> Result<&'r mut xrandr::XRRScreenResources, XrandrError>
+    where 'r: 'h,
     {
         let res = unsafe {
             ptr::NonNull::new(xrandr::XRRGetScreenResources(
@@ -307,8 +305,6 @@ impl XHandle {
     }
 
 
-
-
     /// Applies a difference in crtcs
     /// # Arguments
     /// * `old_crtcs` 
@@ -403,7 +399,7 @@ impl XHandle {
         self.apply_new_crtcs(&mut old_crtcs, &mut new_crtcs)
     }
 
-    // TODO: this seems to not resize the actual window, leaving black space
+
     // TODO: better error documentation
     /// Sets the position of a given output, relative to another
     ///
@@ -526,6 +522,7 @@ pub enum XrandrError {
     #[error("Failed to name of atom {0}")]
     GetAtomName(xlib::Atom),
 }
+
 
 #[cfg(test)]
 mod tests {
