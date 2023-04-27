@@ -235,14 +235,22 @@ impl XHandle {
     /// xhandle.disable(dp_1)?;
     /// ```
     ///
-    pub fn disable(&mut self, o: &Output) -> Result<(), XrandrError> {
-        if o.crtc == 0 { 
-            return Err(XrandrError::OutputDisabled(o.name.clone())) 
+    pub fn disable(&mut self, output: &Output) -> Result<(), XrandrError> {
+        if output.crtc == 0 { 
+            return Err(XrandrError::OutputDisabled(output.name.clone())) 
         }
 
-        ScreenResources::new(self)? 
-            .crtc(self, o.crtc)?
-            .disable(self)
+        let res = ScreenResources::new(self)?;
+        let mut old_crtcs: Vec<Crtc> = res.enabled_crtcs(self)?;
+        let mut new_crtcs: Vec<Crtc> = old_crtcs.clone();
+        
+        let crtc = new_crtcs.iter_mut()
+            .find(|c| c.xid == output.crtc)
+            .ok_or(XrandrError::NoCrtcAvailable)?;
+
+        crtc.disable(self)?;
+
+        self.apply_new_crtcs(&mut old_crtcs, &mut new_crtcs)
     }
 
 
@@ -306,14 +314,17 @@ impl XHandle {
     ///     because crtcs that do not fit the new screen size must be disabeld
     ///     before the new screen size can be set.
     /// * `new_crtcs` 
-    ///     The new crtcs to apply.
+    ///     The new crtcs to apply. This must contain the same crtcs (xids) as 
+    ///     `old_crtcs` and in the same order.
     fn apply_new_crtcs(
         &mut self,
         old_crtcs: &mut [Crtc],
-        new_crtcs: &mut Vec<Crtc>)
+        new_crtcs: &mut [Crtc])
         -> Result<(), XrandrError>
     {
-        let new_size = ScreenSize::fitting_crtcs(self, &new_crtcs);
+        assert!(new_crtcs.len() == old_crtcs.len());
+
+        let new_size = ScreenSize::fitting_crtcs(self, new_crtcs);
 
         // Disable crtcs that do not fit on the new screen
         for c in old_crtcs.iter_mut() {
@@ -363,24 +374,16 @@ impl XHandle {
     {
         let res = ScreenResources::new(self)?;
         
-        let mode_id = output.current_mode
-            .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
-        let rel_mode_id = rel_output.current_mode
-            .ok_or(XrandrError::OutputDisabled(rel_output.name.clone()))?;
-
-        let mode = res.mode(mode_id)?;
-        let rel_mode = res.mode(rel_mode_id)?;
-
         let mut old_crtcs: Vec<Crtc> = res.enabled_crtcs(self)?;
-        let mut crtcs: Vec<Crtc> = old_crtcs.clone();
+        let mut new_crtcs: Vec<Crtc> = old_crtcs.clone();
 
-        let crtc: &mut Crtc = crtcs.iter_mut()
+        let crtc: &mut Crtc = new_crtcs.iter_mut()
             .find(|c| c.xid == output.crtc)
             .ok_or(XrandrError::GetResources)?;
         let rel_crtc = res.crtc(self, rel_output.crtc)?;
 
-        let (w, h) = mode.rot_size(crtc.rotation);
-        let (rel_w, rel_h) = rel_mode.rot_size(rel_crtc.rotation);
+        let (w, h) = (crtc.width as i32, crtc.height as i32);
+        let (rel_w, rel_h) = (rel_crtc.width as i32, rel_crtc.height as i32);
         let (rel_x, rel_y) = (rel_crtc.x, rel_crtc.y);
 
         (crtc.x, crtc.y) = match relation {
@@ -391,7 +394,7 @@ impl XHandle {
             Relation::SameAs  => ( rel_x         , rel_y         ),
         };
 
-        let mut new_crtcs = normalize_positions(&crtcs);
+        let mut new_crtcs = normalize_positions(&new_crtcs);
         self.apply_new_crtcs(&mut old_crtcs, &mut new_crtcs)
     }
 
@@ -429,6 +432,8 @@ impl XHandle {
 
         (crtc.width, crtc.height) = crtc.rot_size(*rotation);
         crtc.rotation = *rotation;
+
+        eprintln!("new size: {}x{}", crtc.width, crtc.height);
 
         self.apply_new_crtcs(&mut old_crtcs, &mut crtcs)
     }
