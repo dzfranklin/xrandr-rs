@@ -3,6 +3,13 @@ use std::slice;
 
 use crate::Xid;
 
+const RR_INTERLACE: u64 = 0x0000_0010;
+const RR_DOUBLE_SCAN: u64 = 0x0000_0020;
+
+// Modes correspond to the various display configurations the outputs 
+// connected to your machine are capable of displaying. This mostly comes
+// down to resolution/refresh rates, but the `flags` field in particular 
+// also encodes whether this mode is interlaced/doublescan
 #[derive(Debug, Clone)]
 pub struct Mode {
     pub xid: Xid,
@@ -21,20 +28,6 @@ pub struct Mode {
     pub rate: f64,
 }
 
-const RR_INTERLACE: u64 = 0x0000_0010;
-const RR_DOUBLE_SCAN: u64 = 0x0000_0020;
-
-fn rate_from_mode(mode: &xrandr::XRRModeInfo) -> f64 {
-    let v_total = 
-        if mode.modeFlags & RR_DOUBLE_SCAN != 0 { mode.vTotal * 2 }
-        else if mode.modeFlags & RR_INTERLACE != 0 { mode.vTotal / 2 }
-        else { mode.vTotal };
-
-    assert!(mode.hTotal != 0 && mode.vTotal != 0);
-
-    mode.dotClock as f64 / (mode.hTotal as f64* v_total as f64)
-}
-
 
 impl From<&xrandr::XRRModeInfo> for Mode {
     fn from(x_mode: &xrandr::XRRModeInfo) -> Self {
@@ -44,6 +37,17 @@ impl From<&xrandr::XRRModeInfo> for Mode {
                 x_mode.nameLength as usize,
             )
         };
+    
+        // Calculate the refresh rate for this mode
+        // This is not given by xrandr, but tends to be useful for end-users
+        assert!(x_mode.hTotal != 0 && x_mode.vTotal != 0);
+        let v_total = 
+            if x_mode.modeFlags & RR_DOUBLE_SCAN != 0 { x_mode.vTotal * 2 }
+            else if x_mode.modeFlags & RR_INTERLACE != 0 { x_mode.vTotal / 2 }
+            else { x_mode.vTotal };
+
+        let rate = x_mode.dotClock as f64 / 
+            (x_mode.hTotal as f64* v_total as f64);
 
         Self {
             xid: x_mode.id,
@@ -58,7 +62,7 @@ impl From<&xrandr::XRRModeInfo> for Mode {
             vsync_start: x_mode.vSyncStart,
             vsync_end: x_mode.vSyncEnd,
             vtotal: x_mode.vTotal,
-            rate: rate_from_mode(x_mode),
+            rate,
             flags: x_mode.modeFlags,
         }
     }

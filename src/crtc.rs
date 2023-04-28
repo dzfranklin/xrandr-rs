@@ -9,21 +9,14 @@ use std::slice;
 use x11::xrandr;
 use std::convert::TryFrom;
 
+
+// A Crtc can display a mode in one of 4 rotations
 #[derive(PartialEq, Eq, Copy, Debug, Clone)]
 pub enum Rotation {
     Normal = 1,
     Left = 2,
     Inverted = 4,
     Right = 8,
-}
-
-#[derive(Copy, Debug, Clone)]
-pub enum Relation {
-    LeftOf,
-    RightOf,
-    Above,
-    Below,
-    SameAs,
 }
 
 impl TryFrom<u16> for Rotation {
@@ -40,6 +33,20 @@ impl TryFrom<u16> for Rotation {
     }
 }
 
+// A Crtc can be positioned relative to another one in one of five directions
+#[derive(Copy, Debug, Clone)]
+pub enum Relation {
+    LeftOf,
+    RightOf,
+    Above,
+    Below,
+    SameAs,
+}
+
+
+// Crtcs define a region of pixels you can see. The Crtc controls the size 
+// and timing of the signal. To this end, the Crtc struct in xrandr maintains
+// a list of attributes that usually correspond to a physical display.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Crtc {
     pub xid: Xid,
