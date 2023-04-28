@@ -186,13 +186,10 @@ impl Crtc {
             Rotation::Left | Rotation::Right        => (h, w),
         };
 
-        let x = match rot {
+        match rot {
             Rotation::Normal | Rotation::Inverted   => (old_w, old_h),
             Rotation::Left | Rotation::Right        => (old_h, old_w),
-        };
-
-        eprintln!("Rot size: ({:?}) = {}x{}", rot, x.0, x.1);
-        x
+        }
     }
 
     /// The most down an dright coordinates that this crtc uses
