@@ -177,8 +177,8 @@ impl Crtc {
     }
 
 
-    /// Width and height, accounting for rotation
-    pub fn rot_size(&self, rot: Rotation) -> (u32, u32) {
+    /// Width and height, accounting for a given rotation
+    #[must_use] pub fn rot_size(&self, rot: Rotation) -> (u32, u32) {
         let (w, h) = (self.width, self.height);
 
         let (old_w, old_h) = match self.rotation {

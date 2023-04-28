@@ -1,7 +1,6 @@
 use x11::xrandr;
 use std::slice;
 
-use crate::crtc::Rotation;
 use crate::Xid;
 
 #[derive(Debug, Clone)]
@@ -22,21 +21,8 @@ pub struct Mode {
     pub rate: f64,
 }
 
-impl Mode {
-    // Width and height, accounting for rotation
-    pub fn rot_size(&self, rot: Rotation) -> (i32, i32) {
-        let (w, h) = ( self.width as i32, self.height as i32);
-
-        match rot {
-            Rotation::Normal | Rotation::Inverted   => (w, h),
-            Rotation::Left | Rotation::Right        => (h, w),
-        }
-    }
-}
-
-
-const RR_INTERLACE: u64 = 0x00000010;
-const RR_DOUBLE_SCAN: u64 = 0x00000020;
+const RR_INTERLACE: u64 = 0x0000_0010;
+const RR_DOUBLE_SCAN: u64 = 0x0000_0020;
 
 fn rate_from_mode(mode: &xrandr::XRRModeInfo) -> f64 {
     let v_total = 

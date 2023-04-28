@@ -134,6 +134,10 @@ impl ScreenResources {
 
     /// Gets information of only the enabled crtcs
     /// See also: `self.crtcs()`
+    /// # Errors
+    /// * `XrandrError::GetCrtcInfo(xid)`
+    ///    -- Getting info failed for crtc with XID `xid`
+    ///
     pub fn enabled_crtcs(&self, handle: &mut XHandle) 
     -> Result<Vec<Crtc>, XrandrError> 
     {
@@ -176,7 +180,7 @@ impl ScreenResources {
     /// let crtcs = res.crtcs(&mut xhandle);
     /// ```
     ///
-    pub fn modes(&self) -> Vec<Mode> {
+    #[must_use] pub fn modes(&self) -> Vec<Mode> {
         self.modes.clone()
     }
 

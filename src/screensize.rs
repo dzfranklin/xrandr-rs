@@ -3,6 +3,9 @@ use x11::{xrandr,xlib};
 use crate::XHandle;
 use crate::crtc::Crtc;
 
+// The amount of milimeters in an inch, needed for dpi calculation
+const INCH_MM: f32 = 25.4;
+
 pub struct ScreenSize {
     width: i32,
     width_mm: i32,
@@ -26,16 +29,18 @@ impl ScreenSize {
     }
 
     /// True iff the given crtc fits on a screen of this size
-    pub fn fits_crtc(&self, crtc: &Crtc) -> bool {
+    #[must_use] pub fn fits_crtc(&self, crtc: &Crtc) -> bool {
         let (max_x, max_y) = crtc.max_coordinates();
         max_x as i32 <= self.width && max_y as i32 <= self.height
 
     }
 
     /// Calculates the screen size that (snugly) fits a set of crtcs
-    pub fn fitting_crtcs(handle: &mut XHandle, crtcs: &[Crtc]) -> Self {
+    pub(crate) fn fitting_crtcs(
+        handle: &mut XHandle, crtcs: &[Crtc]) 
+    -> Self 
+    {
         assert!(!crtcs.is_empty()); // see also: following unwraps
-        const INCH_MM: f32 = 25.4; // The amount of milimeters in an inch
 
         let width = crtcs.iter()
             .map(|p| p.max_coordinates().0)
