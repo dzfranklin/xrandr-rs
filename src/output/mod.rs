@@ -57,62 +57,66 @@ impl Output {
         let res = handle.res()?;
         let display = handle.sys.as_ptr();
 
-        let info = unsafe {
+        let info_ptr = unsafe {
             ptr::NonNull::new(xrandr::XRRGetOutputInfo(display, res, xid))
                 .ok_or(XrandrError::GetOutputInfo(xid))?
-                .as_ref()
         };
 
-        let crtc = info.crtc;
+        let xrandr::XRROutputInfo { 
+             crtc, ncrtc, crtcs, nclone, clones, 
+             nmode, npreferred, modes, name, nameLen, 
+             connection, mm_width, mm_height, subpixel_order,
+             .. 
+        } = unsafe { info_ptr.as_ref() };
 
         let is_primary = xid == unsafe { 
             xrandr::XRRGetOutputPrimary(display, handle.root()) };
 
         let clones = unsafe { 
-            slice::from_raw_parts(info.clones, info.nclone as usize) };
+            slice::from_raw_parts(*clones, *nclone as usize) };
         
         let modes = unsafe { 
-            slice::from_raw_parts(info.modes, info.nmode as usize) };
+            slice::from_raw_parts(*modes, *nmode as usize) };
 
-        let preferred_modes = modes[0..info.npreferred as usize].to_vec();
+        let preferred_modes = modes[0..*npreferred as usize].to_vec();
         
-        let crtcs = unsafe { 
-            slice::from_raw_parts(info.crtcs, info.ncrtc as usize) };
+        let crtcs = unsafe {
+            slice::from_raw_parts(*crtcs, *ncrtc as usize) };
         
         let crtc_info = unsafe {
-            match info.crtc {
+            match *crtc {
                 0 => None,
                 n => Some(*XRRGetCrtcInfo(display, res, n)),
             }
         };
 
         let current_mode = match crtc_info {
-            Some(info) => modes.iter().copied().find(|&m| m == info.mode),
+            Some(c_info) => modes.iter().copied().find(|&m| m == c_info.mode),
             None => None,
         };
         
         // Name processing
         let name_b = unsafe {
             slice::from_raw_parts(
-                info.name as *const u8,
-                info.nameLen as usize)
+                *name as *const u8,
+                *nameLen as usize)
         };
 
         let name = String::from_utf8_lossy(name_b).to_string();
         let properties = Self::get_props(handle, xid)?;
-        let connected = c_int::from(info.connection) == xrandr::RR_Connected;
+        let connected = c_int::from(*connection) == xrandr::RR_Connected;
 
         let result = Self {
             xid,
             properties,
             timestamp: CURRENT_TIME,
             is_primary,
-            crtc,
+            crtc: *crtc,
             name,
-            mm_width: info.mm_width,
-            mm_height: info.mm_height,
+            mm_width: *mm_width,
+            mm_height: *mm_height,
             connected,
-            subpixel_order: info.subpixel_order,
+            subpixel_order: *subpixel_order,
             crtcs: crtcs.to_vec(),
             clones: clones.to_vec(),
             modes: modes.to_vec(),
@@ -120,7 +124,7 @@ impl Output {
             current_mode,
         };
         
-        unsafe { xrandr::XRRFreeOutputInfo(info as *const _ as *mut _) };
+        unsafe { xrandr::XRRFreeOutputInfo(info_ptr.as_ptr()) };
         Ok(result)
     }
 

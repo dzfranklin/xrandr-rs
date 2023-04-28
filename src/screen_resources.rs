@@ -12,7 +12,10 @@ use crate::Time;
 
 
 #[derive(Debug)]
+// TODO: which IDs are possibly useful for the end user?
+// make only those public (outside of crate)
 pub struct ScreenResources {
+    // TODO: Use a time::OffsetDateTime or time::UtcOffset?
     pub timestamp: Time,
     pub config_timestamp: Time,
     pub ncrtc: i32,
@@ -42,6 +45,7 @@ impl ScreenResources {
     pub fn new(handle: &mut XHandle) 
     -> Result<ScreenResources, XrandrError> 
     {
+        // TODO: Free this?
         let res = handle.res()?;
 
         let x_modes: &[xrandr::XRRModeInfo] = unsafe { 
@@ -180,6 +184,7 @@ impl ScreenResources {
     /// let crtcs = res.crtcs(&mut xhandle);
     /// ```
     ///
+    // TODO: return slices (for others too)
     #[must_use] pub fn modes(&self) -> Vec<Mode> {
         self.modes.clone()
     }
@@ -198,8 +203,9 @@ impl ScreenResources {
     /// ```
     ///
     pub fn mode(&self, xid: Xid) -> Result<Mode, XrandrError> {
-        self.modes.iter().cloned()
+        self.modes.iter()
             .find(|c| c.xid == xid)
+            .cloned()
             .ok_or(XrandrError::GetModeInfo(xid))
     }
 }

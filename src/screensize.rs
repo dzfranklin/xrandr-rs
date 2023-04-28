@@ -40,6 +40,7 @@ impl ScreenSize {
         handle: &mut XHandle, crtcs: &[Crtc]) 
     -> Self 
     {
+        // TODO: messages in asserts
         assert!(!crtcs.is_empty()); // see also: following unwraps
 
         let width = crtcs.iter()

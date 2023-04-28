@@ -98,6 +98,7 @@ impl Crtc {
     pub fn from_xid(handle: &mut XHandle, xid: Xid) 
     -> Result<Self,XrandrError>
     {
+        // TODO: do the same as with outputs
         let info = unsafe {
             ptr::NonNull::new(xrandr::XRRGetCrtcInfo(
                 handle.sys.as_ptr(),
@@ -185,7 +186,7 @@ impl Crtc {
 
 
     /// Width and height, accounting for a given rotation
-    #[must_use] pub fn rot_size(&self, rot: Rotation) -> (u32, u32) {
+    #[must_use] pub fn rotated_size(&self, rot: Rotation) -> (u32, u32) {
         let (w, h) = (self.width, self.height);
 
         let (old_w, old_h) = match self.rotation {
