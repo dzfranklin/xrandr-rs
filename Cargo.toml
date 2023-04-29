@@ -16,6 +16,7 @@ thiserror = "1.0.24"
 x11 = { version = "2.18.2", features = ["xlib", "xrandr"] }
 indexmap = "1.6.2"
 serde = {version = "1.0.133", features=["derive"], optional=true}
+time = "0.3.20"
 
 [features]
 serialize = ["serde", "indexmap/serde-1"]

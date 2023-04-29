@@ -7,21 +7,19 @@ use crate::Mode;
 use crate::crtc::Crtc;
 use crate::XrandrError;
 
-use crate::Xid;
-use crate::Time;
+use crate::XId;
+use crate::XTime;
 
 
 #[derive(Debug)]
 // TODO: which IDs are possibly useful for the end user?
 // make only those public (outside of crate)
 pub struct ScreenResources {
-    // TODO: Use a time::OffsetDateTime or time::UtcOffset?
-    pub timestamp: Time,
-    pub config_timestamp: Time,
+    pub timestamp: XTime,
+    pub config_timestamp: XTime,
     pub ncrtc: i32,
-    pub crtcs: Vec<Xid>,
-    pub noutput: i32,
-    pub outputs: Vec<Xid>,
+    crtcs: Vec<XId>,
+    pub outputs: Vec<XId>,
     pub nmode: i32,
     pub modes: Vec<Mode>,
 }
@@ -45,7 +43,7 @@ impl ScreenResources {
     pub fn new(handle: &mut XHandle) 
     -> Result<ScreenResources, XrandrError> 
     {
-        // TODO: Free this?
+        // TODO: does this need to be freed?
         let res = handle.res()?;
 
         let x_modes: &[xrandr::XRRModeInfo] = unsafe { 
@@ -66,7 +64,6 @@ impl ScreenResources {
             config_timestamp: res.configTimestamp,
             ncrtc: res.ncrtc,
             crtcs: x_crtcs.to_vec(),
-            noutput: res.noutput,
             outputs: x_outputs.to_vec(),
             nmode: res.nmode,
             modes
@@ -107,7 +104,7 @@ impl ScreenResources {
     /// let output_89 = res.output(&mut xhandle, 89);
     /// ```
     ///
-    pub fn output(&self, handle: &mut XHandle, xid: Xid)
+    pub fn output(&self, handle: &mut XHandle, xid: XId)
     -> Result<Output, XrandrError> 
     {
         self.outputs(handle)?.into_iter()
@@ -163,7 +160,7 @@ impl ScreenResources {
     /// let current_crtc = res.crtc(&mut xhandle, output.crtc);
     /// ```
     ///
-    pub fn crtc(&self, handle: &mut XHandle, xid: Xid) 
+    pub fn crtc(&self, handle: &mut XHandle, xid: XId) 
     -> Result<Crtc, XrandrError> 
     {
         self.crtcs(handle)?.into_iter()
@@ -184,7 +181,6 @@ impl ScreenResources {
     /// let crtcs = res.crtcs(&mut xhandle);
     /// ```
     ///
-    // TODO: return slices (for others too)
     #[must_use] pub fn modes(&self) -> Vec<Mode> {
         self.modes.clone()
     }
@@ -202,7 +198,7 @@ impl ScreenResources {
     /// let current_mode = res.mode(&mut xhandle, output.mode);
     /// ```
     ///
-    pub fn mode(&self, xid: Xid) -> Result<Mode, XrandrError> {
+    pub fn mode(&self, xid: XId) -> Result<Mode, XrandrError> {
         self.modes.iter()
             .find(|c| c.xid == xid)
             .cloned()

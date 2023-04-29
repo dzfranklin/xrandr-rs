@@ -1,7 +1,7 @@
 use x11::xrandr;
 use std::slice;
 
-use crate::Xid;
+use crate::XId;
 
 const RR_INTERLACE: u64 = 0x0000_0010;
 const RR_DOUBLE_SCAN: u64 = 0x0000_0020;
@@ -12,7 +12,7 @@ const RR_DOUBLE_SCAN: u64 = 0x0000_0020;
 // also encodes whether this mode is interlaced/doublescan
 #[derive(Debug, Clone)]
 pub struct Mode {
-    pub xid: Xid,
+    pub xid: XId,
     pub width: u32,
     pub height: u32,
     pub dot_clock: u64,
@@ -40,7 +40,9 @@ impl From<&xrandr::XRRModeInfo> for Mode {
     
         // Calculate the refresh rate for this mode
         // This is not given by xrandr, but tends to be useful for end-users
-        assert!(x_mode.hTotal != 0 && x_mode.vTotal != 0);
+        assert!(x_mode.hTotal != 0 && x_mode.vTotal != 0,
+            "Framerate calculation would divide by zero");
+
         let v_total = 
             if x_mode.modeFlags & RR_DOUBLE_SCAN != 0 { x_mode.vTotal * 2 }
             else if x_mode.modeFlags & RR_INTERLACE != 0 { x_mode.vTotal / 2 }

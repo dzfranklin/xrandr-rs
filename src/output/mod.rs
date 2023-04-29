@@ -1,37 +1,63 @@
 pub mod property;
 
-use crate::{XHandle, XrandrError};
+use crate::{XHandle, XrandrError, ScreenResources};
 use indexmap::IndexMap;
 use property::{Property, Value};
 use std::os::raw::c_int;
 use std::{ptr, slice};
-use x11::xrandr::XRRGetCrtcInfo;
 use x11::{xlib, xrandr};
 
 use crate::CURRENT_TIME;
-use crate::Time;
-use crate::Xid;
+use crate::XTime;
+use crate::XId;
 
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Output {
-    pub xid: Xid,
+    pub xid: XId,
     pub properties: IndexMap<String, Property>,
-    pub timestamp: Time,
+    pub timestamp: XTime,
     pub is_primary: bool,
-    pub crtc: Xid,
+    pub crtc: XId,
     pub name: String,
     pub mm_width: u64,
     pub mm_height: u64,
     pub connected: bool,
     pub subpixel_order: u16,
-    pub crtcs: Vec<Xid>,
-    pub clones: Vec<Xid>,
-    pub modes: Vec<Xid>,
-    pub preferred_modes: Vec<Xid>,
-    pub current_mode: Option<Xid>,
+    pub crtcs: Vec<XId>,
+    pub clones: Vec<XId>,
+    pub modes: Vec<XId>,
+    pub preferred_modes: Vec<XId>,
+    pub current_mode: Option<XId>,
 }
+
+
+// A wrapper that drops the pointer if it goes out of scope.
+// Avoid having to deal with the various early returns
+struct OutputInfo {
+    pub ptr: ptr::NonNull<xrandr::XRROutputInfo>
+}
+
+impl OutputInfo {
+    fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
+        let raw_ptr = unsafe { 
+            xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), handle.res()?, xid)
+        };
+
+        let ptr = ptr::NonNull::new(raw_ptr)
+            .ok_or(XrandrError::GetOutputInfo(xid))?;
+
+        Ok(Self { ptr })
+    }
+}
+
+impl Drop for OutputInfo {
+    fn drop(&mut self) {
+        unsafe { xrandr::XRRFreeOutputInfo(self.ptr.as_ptr()) };
+    }
+}
+
 
 
 impl Output {
@@ -45,32 +71,24 @@ impl Output {
     #[must_use] pub fn edid(&self) -> Option<Vec<u8>> {
         self.properties.get("EDID").map(|prop| match &prop.value {
             Value::Edid(edid) => edid.clone(),
-            _ => {
-                unreachable!("Property with name EDID can only be of type edid")
-            }
+            _ => unreachable!("Property with name EDID should have type edid")
         })
     }
 
     pub(crate) fn from_xid(handle: &mut XHandle, xid: u64) 
     -> Result<Self, XrandrError> 
     {
-        let res = handle.res()?;
-        let display = handle.sys.as_ptr();
-
-        let info_ptr = unsafe {
-            ptr::NonNull::new(xrandr::XRRGetOutputInfo(display, res, xid))
-                .ok_or(XrandrError::GetOutputInfo(xid))?
-        };
+        let output_info = OutputInfo::new(handle, xid)?;
 
         let xrandr::XRROutputInfo { 
              crtc, ncrtc, crtcs, nclone, clones, 
              nmode, npreferred, modes, name, nameLen, 
              connection, mm_width, mm_height, subpixel_order,
              .. 
-        } = unsafe { info_ptr.as_ref() };
+        } = unsafe { output_info.ptr.as_ref() };
 
         let is_primary = xid == unsafe { 
-            xrandr::XRRGetOutputPrimary(display, handle.root()) };
+            xrandr::XRRGetOutputPrimary(handle.sys.as_ptr(), handle.root()) };
 
         let clones = unsafe { 
             slice::from_raw_parts(*clones, *nclone as usize) };
@@ -83,18 +101,12 @@ impl Output {
         let crtcs = unsafe {
             slice::from_raw_parts(*crtcs, *ncrtc as usize) };
         
-        let crtc_info = unsafe {
-            match *crtc {
-                0 => None,
-                n => Some(*XRRGetCrtcInfo(display, res, n)),
-            }
-        };
+        let curr_crtc = ScreenResources::new(handle)?
+            .crtc(handle, *crtc).ok();
 
-        let current_mode = match crtc_info {
-            Some(c_info) => modes.iter().copied().find(|&m| m == c_info.mode),
-            None => None,
-        };
-        
+        let current_mode = curr_crtc.and_then(|crtc_info|
+            modes.iter().copied().find(|&m| m == crtc_info.mode));
+
         // Name processing
         let name_b = unsafe {
             slice::from_raw_parts(
@@ -124,7 +136,6 @@ impl Output {
             current_mode,
         };
         
-        unsafe { xrandr::XRRFreeOutputInfo(info_ptr.as_ptr()) };
         Ok(result)
     }
 

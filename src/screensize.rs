@@ -40,8 +40,8 @@ impl ScreenSize {
         handle: &mut XHandle, crtcs: &[Crtc]) 
     -> Self 
     {
-        // TODO: messages in asserts
-        assert!(!crtcs.is_empty()); // see also: following unwraps
+        // see also: following unwraps
+        assert!(!crtcs.is_empty(), "Empty input vector");
 
         let width = crtcs.iter()
             .map(|p| p.max_coordinates().0)

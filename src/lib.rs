@@ -41,11 +41,17 @@ mod mode;
 mod crtc;
 
 
-// TODO these are private in xrandr, so redfine i guess
-pub type Time = c_ulong;
-pub type Xid = c_ulong;
-// TODO: this seems to be what xrandr does... am I missing something?
+// All retrieved information is timestamped by when that information was 
+// last changed in the backend. If we alter an object (e.g. crtc, output) we 
+// have to pass the timestamp we got with it. If the x backend detects that 
+// changes have occured since we retrieved the information, our new change 
+// will not go through.
+pub type XTime = c_ulong;
+// Xrandr seems to want the time `0` when calling setter functions
 const CURRENT_TIME: c_ulong = 0;
+// Unique identifiers for the various objects in the x backend 
+// (crtcs,outputs,modes, etc.)
+pub type XId = c_ulong;
 
 
 // The main handle consists simply of a pointer to the display
@@ -57,6 +63,7 @@ pub struct XHandle {
 
 // TODO: implement this for other pointers in the lib?
 // A wrapper that drops the pointer if it goes out of scope.
+// Avoid having to deal with the various early returns
 struct MonitorInfo {
     pub ptr: ptr::NonNull<xrandr::XRRMonitorInfo>,
     pub count: i32,
@@ -80,12 +87,12 @@ impl MonitorInfo {
         }
         
         let ptr = ptr::NonNull::new(raw_ptr)
-            .expect("Succeeded, so non-null");
+            .ok_or(XrandrError::GetMonitors)?;
 
         Ok(Self { ptr, count })
     }
 
-    fn slice(&self) -> &[xrandr::XRRMonitorInfo] {
+    fn as_slice(&self) -> &[xrandr::XRRMonitorInfo] {
         unsafe { 
             slice::from_raw_parts_mut(
                 self.ptr.as_ptr(), 
@@ -161,8 +168,7 @@ impl XHandle {
     pub fn monitors(&mut self) -> Result<Vec<Monitor>, XrandrError> {
         let infos = MonitorInfo::new(self)?;
 
-        // TODO: Move map into ::from()
-        infos.slice()
+        infos.as_slice()
             .iter()
             .map(|sys| {
                 let outputs = unsafe {
@@ -210,8 +216,8 @@ impl XHandle {
         &mut self, o: &Output) 
         -> Result<Crtc, XrandrError> 
     {
-        let res_o = ScreenResources::new(self)?;
-        let crtcs = res_o.crtcs(self)?;
+        let res = ScreenResources::new(self)?;
+        let crtcs = res.crtcs(self)?;
 
         for crtc in crtcs {
             if crtc.possible.contains(&o.xid) && crtc.outputs.is_empty() {
@@ -239,7 +245,7 @@ impl XHandle {
         if output.current_mode.is_some() { return Ok(()) }
 
         let target_mode = output.preferred_modes.first()
-            .ok_or(XrandrError::GetOutputInfo(output.xid))?;
+            .ok_or(XrandrError::NoPreferredModes(output.xid))?;
 
         let mut crtc = self.find_available_crtc(output)?;
         let mode = ScreenResources::new(self)?.mode(*target_mode)?;
@@ -350,7 +356,6 @@ impl XHandle {
         new_crtcs: &mut [Crtc])
         -> Result<(), XrandrError>
     {
-        // TODO message
         assert!(new_crtcs.len() == old_crtcs.len());
 
         let new_size = ScreenSize::fitting_crtcs(self, new_crtcs);
@@ -494,7 +499,8 @@ pub struct Monitor {
 
 
 fn real_bool(sys: xlib::Bool) -> bool {
-    assert!(sys == 0 || sys == 1);
+    assert!(sys == 0 || sys == 1, 
+        "Integer larger than 1 does not represent a bool");
     sys == 1
 }
 
@@ -545,11 +551,17 @@ pub enum XrandrError {
     #[error("Could not get info on crtc with xid {0}")]
     NoPreviousStateCrtc(xlib::XID),
 
-    #[error("Missing before-state for changing CRTC with xid {0}")]
+    #[error("Call to XRRGetCrtcInfo for CRTC with xid {0} failed")]
+    GetCrtcInfo(xlib::XID),
+    
+    #[error("Failed to get Crtc: No Crtc with ID {0}")]
     GetCrtc(xlib::XID),
 
     #[error("Call to XRRGetOutputInfo for output with xid {0} failed")]
     GetOutputInfo(xlib::XID),
+    
+    #[error("No preferred modes found for output with xid {0}")]
+    NoPreferredModes(xlib::XID),
 
     #[error("No mode found with xid {0}")]
     GetModeInfo(xlib::XID),

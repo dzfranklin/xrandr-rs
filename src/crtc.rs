@@ -1,5 +1,5 @@
-use crate::Xid;
-use crate::Time;
+use crate::XId;
+use crate::XTime;
 use crate::CURRENT_TIME;
 use crate::XHandle;
 use crate::XrandrError;
@@ -49,24 +49,24 @@ pub enum Relation {
 // a list of attributes that usually correspond to a physical display.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Crtc {
-    pub xid: Xid,
-    pub timestamp: Time,
+    pub xid: XId,
+    pub timestamp: XTime,
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    pub mode: Xid,
+    pub mode: XId,
     pub rotation: Rotation,
-    pub outputs: Vec<Xid>,
+    pub outputs: Vec<XId>,
     pub rotations: u16,
-    pub possible: Vec<Xid>,
+    pub possible: Vec<XId>,
 }
 
 
 /// Normalizes a set of Crtcs by making sure the top left pixel of the screen
 /// is at (0,0). This is needed after changing positions/rotations.
 pub(crate) fn normalize_positions(crtcs: &[Crtc]) -> Vec<Crtc> {
-    assert!(!crtcs.is_empty());
+    if crtcs.is_empty() { return crtcs.to_vec() };
 
     let left = crtcs.iter().map(|p| p.x).min().unwrap();
     let top = crtcs.iter().map(|p| p.y).min().unwrap();
@@ -74,6 +74,31 @@ pub(crate) fn normalize_positions(crtcs: &[Crtc]) -> Vec<Crtc> {
     crtcs.iter()
         .map(|p| p.offset((-left, -top)))
         .collect()
+}
+
+// A wrapper that drops the pointer if it goes out of scope.
+// Avoid having to deal with the various early returns
+struct CrtcInfo {
+    pub ptr: ptr::NonNull<xrandr::XRRCrtcInfo>
+}
+
+impl CrtcInfo {
+    fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
+        let raw_ptr = unsafe { 
+            xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), handle.res()?, xid)
+        };
+
+        let ptr = ptr::NonNull::new(raw_ptr)
+            .ok_or(XrandrError::GetCrtcInfo(xid))?;
+
+        Ok(Self { ptr })
+    }
+}
+
+impl Drop for CrtcInfo {
+    fn drop(&mut self) {
+        unsafe { xrandr::XRRFreeCrtcInfo(self.ptr.as_ptr()) };
+    }
 }
 
 
@@ -95,44 +120,38 @@ impl Crtc {
     /// let mon1 = xhandle.monitors()?[0];
     /// ```
     ///
-    pub fn from_xid(handle: &mut XHandle, xid: Xid) 
+    pub fn from_xid(handle: &mut XHandle, xid: XId) 
     -> Result<Self,XrandrError>
     {
         // TODO: do the same as with outputs
-        let info = unsafe {
-            ptr::NonNull::new(xrandr::XRRGetCrtcInfo(
-                handle.sys.as_ptr(),
-                handle.res()?,
-                xid,
-            ))
-            .ok_or(XrandrError::GetCrtc(xid))?
-            .as_mut()
-        };
+        let crtc_info = CrtcInfo::new(handle, xid)?;
 
-        let rotation = Rotation::try_from(info.rotation)?;
+        let xrandr::XRRCrtcInfo {
+            timestamp, x, y, width, height, mode, rotation, 
+            noutput, outputs, rotations, npossible, possible
+        } = unsafe { crtc_info.ptr.as_ref() };
+
+        let rotation = Rotation::try_from(*rotation)?;
 
         let outputs = unsafe { 
-            slice::from_raw_parts(info.outputs, info.noutput as usize) };
+            slice::from_raw_parts(*outputs, *noutput as usize) };
 
         let possible = unsafe { 
-            slice::from_raw_parts(info.possible, info.npossible as usize) };
+            slice::from_raw_parts(*possible, *npossible as usize) };
 
-        let result = Self {
+        Ok(Self {
             xid,
-            timestamp: info.timestamp,
-            x: info.x,
-            y: info.y,
-            width: info.width,
-            height: info.height,
-            mode: info.mode,
+            timestamp: *timestamp,
+            x: *x,
+            y: *y,
+            width: *width,
+            height: *height,
+            mode: *mode,
             rotation,
             outputs: outputs.to_vec(),
-            rotations: info.rotations,
+            rotations: *rotations,
             possible: possible.to_vec(),
-        };
-        
-        unsafe { xrandr::XRRFreeCrtcInfo(info as *const _ as *mut _) };
-        Ok(result)
+        })
     }
 
     /// Apply the current fields of this crtc.
@@ -147,7 +166,6 @@ impl Crtc {
     pub(crate) fn apply(&mut self, handle: &mut XHandle) 
     -> Result<(), XrandrError> 
     {
-        // TODO: do we need to actually pass the null pointer?
         let outputs = match self.outputs.len() {
             0 => std::ptr::null_mut(),
             _ => self.outputs.as_mut_ptr(),
@@ -202,7 +220,9 @@ impl Crtc {
 
     /// The most down an dright coordinates that this crtc uses
     pub(crate) fn max_coordinates(&self) -> (u32, u32) {
-        assert!(self.x >= 0 && self.y >= 0); // Must be normalized
+        assert!(self.x >= 0 && self.y >= 0,
+            "max_coordinates should be called on normalized crtc");
+
         // let (w, h) = self.rot_size();
         // I think crtcs have this incorporated in their width/height fields
         (self.x as u32 + self.width, self.y as u32 + self.height)
@@ -213,10 +233,11 @@ impl Crtc {
         let x = self.x as i64 + offset.0 as i64;
         let y = self.y as i64 + offset.1 as i64;
         
+        assert!(x < i32::MAX as i64 && y < i32::MAX as i64,
+            "This offset would cause integer overflow");
 
-        assert!(x < i32::MAX as i64 && y < i32::MAX as i64);
-        // This should hold after offsetting (normalized)
-        assert!(x >= 0 && y >= 0);
+        assert!(x >= 0 && y >= 0,
+            "Invalid coordinates after offset");
 
         let mut new = self.clone();
         new.x = x as i32;
