@@ -168,6 +168,7 @@ impl ScreenResources {
             .ok_or(XrandrError::GetCrtc(xid))
     }
 
+
     // TODO: better error documentation
     /// Gets information on all crtcs
     ///
@@ -204,5 +205,6 @@ impl ScreenResources {
             .cloned()
             .ok_or(XrandrError::GetModeInfo(xid))
     }
+
 }
 
