@@ -12,12 +12,12 @@ use std::fmt::Debug;
 use std::os::raw::c_ulong;
 use std::{ptr, slice};
 
+use crtc::normalize_positions;
 pub use indexmap;
 pub use screen_resources::ScreenResources;
 use thiserror::Error;
 use x11::{xlib, xrandr};
 
-use crate::crtc::normalize_positions;
 pub use crate::crtc::Crtc;
 pub use crate::crtc::{Rotation, Relation};
 pub use crate::mode::Mode;
@@ -406,16 +406,12 @@ impl XHandle {
         relative_output: &Output) 
         -> Result<(), XrandrError> 
     {
-        let res = ScreenResources::new(self)?;
+        let rel_crtc = ScreenResources::new(self)?
+            .crtc(self, relative_output.crtc)?;
+
+        let mut changes = crtc::Changes::new(self)?;
+        let crtc = changes.get_new(output.crtc)?;
         
-        let mut old_crtcs: Vec<Crtc> = res.enabled_crtcs(self)?;
-        let mut new_crtcs: Vec<Crtc> = old_crtcs.clone();
-
-        let crtc: &mut Crtc = new_crtcs.iter_mut()
-            .find(|c| c.xid == output.crtc)
-            .ok_or(XrandrError::GetResources)?;
-        let rel_crtc = res.crtc(self, relative_output.crtc)?;
-
         // Calculate new (x,y) based on:
         // - own width/height
         // - relative outputs width/height/x/y
@@ -431,8 +427,8 @@ impl XHandle {
             Relation::SameAs  => ( rel_x         , rel_y         ),
         };
 
-        let mut new_crtcs = normalize_positions(&new_crtcs);
-        self.apply_new_crtcs(&mut old_crtcs, &mut new_crtcs)
+        normalize_positions(changes.get_all_news());
+        changes.apply(self)
     }
 
 
@@ -457,18 +453,13 @@ impl XHandle {
         output: &Output,
         rotation: &Rotation,
     ) -> Result<(), XrandrError> {
-        let mut old_crtcs: Vec<Crtc> =
-            ScreenResources::new(self)?.enabled_crtcs(self)?;
-        let mut crtcs = old_crtcs.clone();
-
-        let mut crtc = crtcs.iter_mut()
-            .find(|c| c.xid == output.crtc)
-            .ok_or(XrandrError::NoCrtcAvailable)?;
-
+        let mut changes = crtc::Changes::new(self)?;
+        let crtc = changes.get_new(output.crtc)?;
+        
         (crtc.width, crtc.height) = crtc.rotated_size(*rotation);
         crtc.rotation = *rotation;
 
-        self.apply_new_crtcs(&mut old_crtcs, &mut crtcs)
+        changes.apply(self)
     }
 }
 

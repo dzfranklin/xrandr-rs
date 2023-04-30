@@ -1,3 +1,5 @@
+use crate::ScreenResources;
+use crate::ScreenSize;
 use crate::XId;
 use crate::XTime;
 use crate::CURRENT_TIME;
@@ -65,15 +67,16 @@ pub struct Crtc {
 
 /// Normalizes a set of Crtcs by making sure the top left pixel of the screen
 /// is at (0,0). This is needed after changing positions/rotations.
-pub(crate) fn normalize_positions(crtcs: &[Crtc]) -> Vec<Crtc> {
-    if crtcs.is_empty() { return crtcs.to_vec() };
+pub(crate) fn normalize_positions(mut crtcs: Vec<&mut Crtc>) {
+    if crtcs.is_empty() { return };
 
     let left = crtcs.iter().map(|p| p.x).min().unwrap();
     let top = crtcs.iter().map(|p| p.y).min().unwrap();
+    if (top,left) == (0,0) { return };
     
-    crtcs.iter()
-        .map(|p| p.offset((-left, -top)))
-        .collect()
+    for c in &mut crtcs {
+        c.offset((-left, -top));
+    }
 }
 
 // A wrapper that drops the pointer if it goes out of scope.
@@ -229,7 +232,7 @@ impl Crtc {
     }
 
     /// Creates a new Crtc that is offset (.x and .y) fields, by offset param
-    pub(crate) fn offset(&self, offset: (i32, i32)) -> Self {
+    pub(crate) fn offset(&mut self, offset: (i32, i32)) {
         let x = self.x as i64 + offset.0 as i64;
         let y = self.y as i64 + offset.1 as i64;
         
@@ -239,10 +242,78 @@ impl Crtc {
         assert!(x >= 0 && y >= 0,
             "Invalid coordinates after offset");
 
-        let mut new = self.clone();
-        new.x = x as i32;
-        new.y = y as i32;
-        new
+        self.x = x as i32;
+        self.y = y as i32;
+    }
+}
+
+/// A Crtc change consists of a new and an old state
+/// A change should be applied if these two differ
+pub struct Change {
+    pub old: Crtc,
+    pub new: Crtc,
+}
+
+/// The changes struct keeps track of all crtcs and how they have changed
+/// Its methods facilitate the changing of crtcs in the xrandr backend.
+pub struct Changes {
+    changes: Vec<Change>,
+}
+
+impl Changes {
+    /// Generates a `changes` vector where `old` and `new` start of identical
+    pub(crate) fn new(handle: &mut XHandle) -> Result<Self, XrandrError> {
+        let res = ScreenResources::new(handle)?;
+        let old_crtcs = res.enabled_crtcs(handle)?;
+
+        let changes = old_crtcs.into_iter()
+            .map(|c| Change { old: c.clone(), new: c })
+            .collect::<Vec<Change>>();
+
+        Ok(Self { changes })
+    }
+
+    /// Apply the differences made to the `new` crtcs
+    pub(crate) fn apply(&mut self, handle: &mut XHandle) 
+    -> Result<(), XrandrError> 
+    {
+        // Calculate a new screensize based on the new crtcs
+        let new_crtcs = self.changes.iter()
+            .map(|Change { old:_, new }| new)
+            .collect::<Vec<&Crtc>>();
+        let new_size = ScreenSize::fitting_crtcs2(handle, &new_crtcs);
+
+        // Disable crtcs that do not fit on the new screen
+        for Change { old, new:_ } in &mut self.changes {
+            if !new_size.fits_crtc(old) { old.disable(handle)?; }
+        }
+
+        new_size.set(handle); // Perform the resize xrandr call
+
+        // Move/rotate and enable the crtcs
+        for Change { old, new } in &mut self.changes {
+            if new != old { new.apply(handle)? }
+        }
+
+        Ok(())
+    }
+    
+    /// Get a reference to the new state of the crtc with id `xid`
+    pub(crate) fn get_new(&mut self, xid: XId) 
+    -> Result<&mut Crtc, XrandrError>
+    {
+        self.changes.iter_mut()
+            .map(|Change { old:_, new }| new)
+            .find(|crtc| crtc.xid == xid)
+            .ok_or(XrandrError::GetCrtc(xid))
+    }
+
+    /// Get the refences to all the new states
+    pub(crate) fn get_all_news(&mut self) -> Vec<&mut Crtc> {
+        let x = self.changes.iter_mut()
+            .map(|Change { old:_, new }| new);
+
+        x.collect()
     }
 }
 
