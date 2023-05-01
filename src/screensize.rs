@@ -6,6 +6,7 @@ use crate::crtc::Crtc;
 // The amount of milimeters in an inch, needed for dpi calculation
 const INCH_MM: f32 = 25.4;
 
+#[derive(Debug)]
 pub struct ScreenSize {
     width: i32,
     width_mm: i32,

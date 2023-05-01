@@ -311,6 +311,9 @@ impl XHandle {
 
 
     // TODO: better error documentation
+    // TODO: Resize the screen after resolution change?
+    // - xrandr does not seem to resize after a rotation, and this feels
+    //   similar to me. I would say let the user reposition the displays
     /// Sets the mode of a given output, relative to another
     ///
     /// # Arguments
@@ -413,8 +416,7 @@ impl XHandle {
         let crtc = changes.get_new(output.crtc)?;
         
         // Calculate new (x,y) based on:
-        // - own width/height
-        // - relative outputs width/height/x/y
+        // - own width/height & relative output's width/height/x/y
         let (w, h) = (crtc.width as i32, crtc.height as i32);
         let (rel_w, rel_h) = (rel_crtc.width as i32, rel_crtc.height as i32);
         let (rel_x, rel_y) = (rel_crtc.x, rel_crtc.y);

@@ -285,14 +285,21 @@ impl Changes {
 
         // Disable crtcs that do not fit on the new screen
         for Change { old, new:_ } in &mut self.changes {
-            if !new_size.fits_crtc(old) { old.disable(handle)?; }
+            if !new_size.fits_crtc(old) { 
+                eprintln!("Disabling:{:?}\n", old);
+                old.disable(handle)?; 
+            }
         }
 
+        eprintln!("Settin screen size to: {:?}", new_size);
         new_size.set(handle); // Perform the resize xrandr call
 
         // Move/rotate and enable the crtcs
         for Change { old, new } in &mut self.changes {
-            if new != old { new.apply(handle)? }
+            if new != old { 
+                eprintln!("Applying:{:?}\n", new);
+                new.apply(handle)?; 
+            }
         }
 
         Ok(())
@@ -310,10 +317,9 @@ impl Changes {
 
     /// Get the refences to all the new states
     pub(crate) fn get_all_news(&mut self) -> Vec<&mut Crtc> {
-        let x = self.changes.iter_mut()
-            .map(|Change { old:_, new }| new);
-
-        x.collect()
+        self.changes.iter_mut()
+            .map(|Change { old:_, new }| new)
+            .collect()
     }
 }
 
