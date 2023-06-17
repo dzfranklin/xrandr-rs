@@ -1,16 +1,11 @@
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_lossless)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::cast_possible_wrap)]
-// TODO this is done atm because xrandr seems to mix it's number types a lot
-// and I cannot be bothered to do proper conversion everywhere (yet)
-// Maybe I am missing something and I should handle them differently?
-
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::os::raw::c_ulong;
-use std::{ptr, slice};
+use std::ptr;
+use itertools::Itertools;
+use itertools::EitherOrBoth as ZipEntry;
+
 
 use crtc::normalize_positions;
 pub use indexmap;
@@ -22,6 +17,8 @@ pub use crate::crtc::Crtc;
 pub use crate::crtc::{Rotation, Relation};
 pub use crate::mode::Mode;
 pub use crate::screensize::ScreenSize;
+pub use crate::monitor::Monitor;
+use crate::monitor::MonitorInfo;
 pub use output::{
     property::{
         Property, 
@@ -36,6 +33,7 @@ pub use output::{
 
 mod screen_resources;
 mod screensize;
+mod monitor;
 mod output;
 mod mode;
 mod crtc;
@@ -61,56 +59,7 @@ pub struct XHandle {
     sys: HandleSys,
 }
 
-// TODO: implement this for other pointers in the lib?
-// A wrapper that drops the pointer if it goes out of scope.
-// Avoid having to deal with the various early returns
-struct MonitorInfo {
-    pub ptr: ptr::NonNull<xrandr::XRRMonitorInfo>,
-    pub count: i32,
-}
-
-impl MonitorInfo {
-    fn new(handle: &mut XHandle) -> Result<Self,XrandrError> {
-        let mut count = 0;
-
-        let raw_ptr = unsafe {
-            xrandr::XRRGetMonitors(
-                handle.sys.as_ptr(),
-                handle.root(),
-                0,
-                &mut count,
-            )
-        };
-        
-        if count == -1 {
-            return Err(XrandrError::GetMonitors);
-        }
-        
-        let ptr = ptr::NonNull::new(raw_ptr)
-            .ok_or(XrandrError::GetMonitors)?;
-
-        Ok(Self { ptr, count })
-    }
-
-    fn as_slice(&self) -> &[xrandr::XRRMonitorInfo] {
-        unsafe { 
-            slice::from_raw_parts_mut(
-                self.ptr.as_ptr(), 
-                self.count as usize
-            )
-        }
-    }
-}
-
-impl Drop for MonitorInfo {
-    fn drop(&mut self) {
-        unsafe { xrandr::XRRFreeMonitors(self.ptr.as_ptr()) };
-    }
-}
-
-
 impl XHandle {
-    // TODO: better error documentation
     /// Open a handle to the lib-xrandr backend. This will be 
     /// used for nearly all interactions with the xrandr lib
     ///
@@ -132,33 +81,11 @@ impl XHandle {
         Ok(Self { sys })
     }
 
-    pub(crate) fn res<'r, 'h>( &'h mut self,) 
-    -> Result<&'r mut xrandr::XRRScreenResources, XrandrError>
-    where 'r: 'h,
-    {
-        let res = unsafe {
-            ptr::NonNull::new(xrandr::XRRGetScreenResources(
-                self.sys.as_ptr(),
-                self.root(),
-            ))
-            .ok_or(XrandrError::GetResources)?
-            .as_mut()
-        };
 
-        Ok(res)
-    }
-
-
-    fn root(&mut self) -> c_ulong {
-        unsafe { xlib::XDefaultRootWindow(self.sys.as_ptr()) }
-    }
-
-
-    // TODO: better error documentation
     /// List every monitor
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -192,11 +119,10 @@ impl XHandle {
     }
 
 
-    // TODO: better error documentation
     /// List every monitor's outputs
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -207,8 +133,6 @@ impl XHandle {
         ScreenResources::new(self)?.outputs(self)
     }
 
-
-    // START setter methods
 
     // TODO: this seems to be more complicated in xrandr.c
     // Finds an available Crtc for a given (disabled) output
@@ -229,11 +153,10 @@ impl XHandle {
     }
 
 
-    // TODO: better error documentation
     /// Enable the given output by setting it to its preferred mode
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -251,16 +174,17 @@ impl XHandle {
         let mode = ScreenResources::new(self)?.mode(*target_mode)?;
 
         crtc.mode = mode.xid;
+        crtc.width = mode.width;
+        crtc.height = mode.height;
         crtc.outputs = vec![output.xid];
 
-        crtc.apply(self)
+        self.apply_new_crtcs(&mut [crtc])
     }
 
-    // TODO: better error documentation
     /// Disable the given output
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -269,30 +193,23 @@ impl XHandle {
     /// ```
     ///
     pub fn disable(&mut self, output: &Output) -> Result<(), XrandrError> {
-        // TODO: this should also be an option? 0 is not enabled
-        if output.crtc == 0 { 
-            return Err(XrandrError::OutputDisabled(output.name.clone())) 
-        }
+        let crtc_id = match output.crtc {
+            None => return Ok(()),
+            Some(xid) => xid,
+        };
 
         let res = ScreenResources::new(self)?;
-        let mut old_crtcs = res.enabled_crtcs(self)?;
-        let mut new_crtcs = old_crtcs.clone();
-        
-        let crtc = new_crtcs.iter_mut()
-            .find(|c| c.xid == output.crtc)
-            .ok_or(XrandrError::NoCrtcAvailable)?;
+        let mut crtc = res.crtc(self, crtc_id)?;
+        crtc.set_disable();
 
-        crtc.disable(self)?;
-
-        self.apply_new_crtcs(&mut old_crtcs, &mut new_crtcs)
+        self.apply_new_crtcs(&mut [crtc])
     }
 
 
-    // TODO: better error documentation
     /// Sets the given output as the primary output
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -310,7 +227,6 @@ impl XHandle {
     }
 
 
-    // TODO: better error documentation
     // TODO: Resize the screen after resolution change?
     // - xrandr does not seem to resize after a rotation, and this feels
     //   similar to me. I would say let the user reposition the displays
@@ -321,7 +237,7 @@ impl XHandle {
     /// * `mode` - The mode to change to
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -336,55 +252,15 @@ impl XHandle {
         mode: &Mode) 
         -> Result<(), XrandrError> 
     {
-        let mut crtc = ScreenResources::new(self)?.crtc(self, output.crtc)?;
+        let crtc_id = output.crtc
+            .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
+        let mut crtc = ScreenResources::new(self)?.crtc(self, crtc_id)?;
+
         crtc.mode = mode.xid;
-        crtc.apply(self)
+        self.apply_new_crtcs(&mut [crtc])
     }
 
 
-    /// Applies a difference in crtcs
-    /// # Arguments
-    /// * `old_crtcs` 
-    ///     The crtcs as they were before the change. This is required,
-    ///     because crtcs that do not fit the new screen size must be disabeld
-    ///     before the new screen size can be set.
-    /// * `new_crtcs` 
-    ///     The new crtcs to apply. This must contain the same crtcs (xids) as 
-    ///     `old_crtcs` and in the same order.
-    // TODO: potentially a hashmap :: xid -> (old, new)
-    // -- Or CrtcChanges object
-    fn apply_new_crtcs(
-        &mut self,
-        old_crtcs: &mut [Crtc],
-        new_crtcs: &mut [Crtc])
-        -> Result<(), XrandrError>
-    {
-        assert!(new_crtcs.len() == old_crtcs.len());
-
-        let new_size = ScreenSize::fitting_crtcs(self, new_crtcs);
-
-        // Disable crtcs that do not fit on the new screen
-        for c in old_crtcs.iter_mut() {
-            if !new_size.fits_crtc(c) { 
-                c.disable(self)?; 
-            }
-        }
-
-        new_size.set(self);
-
-        // Move and enable the crtcs
-        for (old_c, new_c) in old_crtcs.iter().zip(new_crtcs.iter_mut()) {
-            assert!(old_c.xid == new_c.xid); 
-            // The below comparison checks whether a given crtc has changed
-            // so we need to make sure we are actually looking at the same crtc
-            if new_c != old_c { new_c.apply(self)? }
-        }
-
-        Ok(())
-    }
-
-
-    // TODO: better error documentation
     /// Sets the position of a given output, relative to another
     ///
     /// # Arguments
@@ -393,7 +269,7 @@ impl XHandle {
     /// * `rel_output` - The output to position relative to
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -409,11 +285,14 @@ impl XHandle {
         relative_output: &Output) 
         -> Result<(), XrandrError> 
     {
-        let rel_crtc = ScreenResources::new(self)?
-            .crtc(self, relative_output.crtc)?;
+        let crtc_id = output.crtc
+            .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
+        let rel_crtc_id = relative_output.crtc
+            .ok_or(XrandrError::OutputDisabled(relative_output.name.clone()))?;
 
-        let mut changes = crtc::Changes::new(self)?;
-        let crtc = changes.get_new(output.crtc)?;
+        let res = ScreenResources::new(self)?;
+        let mut crtc = res.crtc(self, crtc_id)?;
+        let rel_crtc = res.crtc(self, rel_crtc_id)?;
         
         // Calculate new (x,y) based on:
         // - own width/height & relative output's width/height/x/y
@@ -429,12 +308,10 @@ impl XHandle {
             Relation::SameAs  => ( rel_x         , rel_y         ),
         };
 
-        normalize_positions(changes.get_all_news());
-        changes.apply(self)
+        self.apply_new_crtcs(&mut [crtc])
     }
 
 
-    // TODO: better error documentation
     /// Sets the position of a given output, relative to another
     ///
     /// # Arguments
@@ -442,7 +319,7 @@ impl XHandle {
     /// * `rotation`
     ///
     /// # Errors
-    /// Various calls to the xrandr backend may fail
+    /// * `XrandrError::_` - various calls to the xrandr backend may fail
     ///
     /// # Examples
     /// ```
@@ -455,13 +332,118 @@ impl XHandle {
         output: &Output,
         rotation: &Rotation,
     ) -> Result<(), XrandrError> {
-        let mut changes = crtc::Changes::new(self)?;
-        let crtc = changes.get_new(output.crtc)?;
+        let crtc_id = output.crtc
+            .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
         
+        let res = ScreenResources::new(self)?;
+        let mut crtc = res.crtc(self, crtc_id)?;
+
         (crtc.width, crtc.height) = crtc.rotated_size(*rotation);
         crtc.rotation = *rotation;
 
-        changes.apply(self)
+        self.apply_new_crtcs(&mut [crtc])
+    }
+
+
+    /// Applies some set of altered crtcs
+    /// Due to xrandr's structure, changing one or more crtcs properly can be
+    /// quite complicated. One should therefore call this function on any crtcs
+    /// that you want to change.
+    /// # Arguments
+    /// * `changes` 
+    ///     Altered crtcs. Must be mutable because of crct.apply() calls.
+    ///
+    fn apply_new_crtcs(
+        &mut self,
+        changed: &mut [Crtc])
+        -> Result<(), XrandrError>
+    {
+        let res = ScreenResources::new(self)?;
+        let old_crtcs = res.enabled_crtcs(self)?;
+
+        // Construct new crtcs out of the old ones and the new where provided
+        let mut changed_map: HashMap<XId, Crtc> = HashMap::new();
+        changed.iter().cloned().for_each(|c| { changed_map.insert(c.xid, c); });
+
+        let mut new_crtcs: Vec<Crtc> = Vec::new();
+        for crtc in &old_crtcs {
+            match changed_map.remove(&crtc.xid) {
+                None => new_crtcs.push(crtc.clone()),
+                Some(c) => new_crtcs.push(c.clone()),
+            }
+        }
+        new_crtcs.extend(changed_map.drain().map(|(_,v)| v));
+
+        // In case the top-left corner is no longer at (0,0), renormalize
+        normalize_positions(&mut new_crtcs);
+        let new_size = ScreenSize::fitting_crtcs(self, &new_crtcs);
+
+        // Disable crtcs that do not fit before setting the new size
+        // Note that this should only be crtcs that were changed, but `changed`
+        // contains the already altered crtc, so we have to use `old_crtcs`
+        let mut old_crtcs = old_crtcs;
+        for crtc in &mut old_crtcs {
+            if !new_size.fits_crtc(crtc) {
+                crtc.set_disable(); 
+                crtc.apply(self)?;
+            }
+        }
+        self.set_screensize(&new_size);
+
+        // Find the crtcs that were changed. Done this late to also account 
+        // for crtcs that were altered by normalize_positions()
+        let mut to_apply: Vec<&mut Crtc> = Vec::new();
+        for pair in old_crtcs.iter().zip_longest(new_crtcs.iter_mut()) {
+            match pair {
+                ZipEntry::Both(old, new) => { 
+                    assert!(old.xid == new.xid, "invalid new_crtcs");
+                    if new.timestamp < old.timestamp {
+                        return Err(XrandrError::CrtcChanged(new.xid));
+                    }
+                    if new != old { to_apply.push(new); }
+                },
+                ZipEntry::Right(new) => to_apply.push(new),
+                ZipEntry::Left(_) => unreachable!("invalid new_crtcs"),
+            }
+        }
+
+        // Move and re-enable the crtcs
+        to_apply.iter_mut().try_for_each(|c| c.apply(self))
+    }
+
+    /// Sets the screen size in the x backend
+    fn set_screensize(&mut self, size: &ScreenSize) {
+        unsafe {
+            xrandr::XRRSetScreenSize(
+                self.sys.as_ptr(),
+                self.root(),
+                size.width,
+                size.height,
+                size.width_mm,
+                size.height_mm,
+            );
+        }
+    }
+
+    // private helpers
+    pub(crate) fn res<'r, 'h>( &'h mut self,) 
+    -> Result<&'r mut xrandr::XRRScreenResources, XrandrError>
+    where 'r: 'h,
+    {
+        let res = unsafe {
+            ptr::NonNull::new(xrandr::XRRGetScreenResources(
+                self.sys.as_ptr(),
+                self.root(),
+            ))
+            .ok_or(XrandrError::GetResources)?
+            .as_mut()
+        };
+
+        Ok(res)
+    }
+
+    fn root(&mut self) -> c_ulong {
+        unsafe { xlib::XDefaultRootWindow(self.sys.as_ptr()) }
     }
 }
 
@@ -472,23 +454,6 @@ impl Drop for XHandle {
     }
 }
 
-
-#[derive(Debug)]
-#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-pub struct Monitor {
-    pub name: String,
-    pub is_primary: bool,
-    pub is_automatic: bool,
-    pub x: i32,
-    pub y: i32,
-    pub width_px: i32,
-    pub height_px: i32,
-    pub width_mm: i32,
-    pub height_mm: i32,
-    /// An Output describes an actual physical monitor or display. A [`Monitor`]
-    /// can have more than one output.
-    pub outputs: Vec<Output>,
-}
 
 
 fn real_bool(sys: xlib::Bool) -> bool {
@@ -541,8 +506,8 @@ pub enum XrandrError {
     #[error("Could not get info on mode with xid {0}")]
     GetMode(xlib::XID),
 
-    #[error("Could not get info on crtc with xid {0}")]
-    NoPreviousStateCrtc(xlib::XID),
+    #[error("Crtc changed since last requesting its state")]
+    CrtcChanged(xlib::XID),
 
     #[error("Call to XRRGetCrtcInfo for CRTC with xid {0} failed")]
     GetCrtcInfo(xlib::XID),

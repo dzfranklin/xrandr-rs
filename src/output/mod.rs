@@ -19,7 +19,7 @@ pub struct Output {
     pub properties: IndexMap<String, Property>,
     pub timestamp: XTime,
     pub is_primary: bool,
-    pub crtc: XId,
+    pub crtc: Option<XId>,
     pub name: String,
     pub mm_width: u64,
     pub mm_height: u64,
@@ -101,6 +101,8 @@ impl Output {
         let crtcs = unsafe {
             slice::from_raw_parts(*crtcs, *ncrtc as usize) };
         
+        let crtc_id = if *crtc == 0 { None } else { Some(*crtc) };
+
         let curr_crtc = ScreenResources::new(handle)?
             .crtc(handle, *crtc).ok();
 
@@ -123,7 +125,7 @@ impl Output {
             properties,
             timestamp: CURRENT_TIME,
             is_primary,
-            crtc: *crtc,
+            crtc: crtc_id,
             name,
             mm_width: *mm_width,
             mm_height: *mm_height,

@@ -1,5 +1,3 @@
-use crate::ScreenResources;
-use crate::ScreenSize;
 use crate::XId;
 use crate::XTime;
 use crate::CURRENT_TIME;
@@ -67,14 +65,14 @@ pub struct Crtc {
 
 /// Normalizes a set of Crtcs by making sure the top left pixel of the screen
 /// is at (0,0). This is needed after changing positions/rotations.
-pub(crate) fn normalize_positions(mut crtcs: Vec<&mut Crtc>) {
+pub(crate) fn normalize_positions(crtcs: &mut Vec<Crtc>) {
     if crtcs.is_empty() { return };
 
     let left = crtcs.iter().map(|p| p.x).min().unwrap();
     let top = crtcs.iter().map(|p| p.y).min().unwrap();
     if (top,left) == (0,0) { return };
     
-    for c in &mut crtcs {
+    for c in crtcs.iter_mut() {
         c.offset((-left, -top));
     }
 }
@@ -106,7 +104,6 @@ impl Drop for CrtcInfo {
 
 
 impl Crtc {
-    // TODO: better error documentation
     /// Open a handle to the lib-xrandr backend. This will be 
     /// used for nearly all interactions with the xrandr lib
     ///
@@ -157,13 +154,14 @@ impl Crtc {
         })
     }
 
-    /// Apply the current fields of this crtc.
+    /// Apply the current fields of this crtc. `&mut self` needed to create a 
+    /// mut pointer to outputs, which lib-xrandr seems to require.
     /// # Examples
     /// ```
     /// // Sets new mode on the crtc of some output
     /// let mut crtc = ScreenResources::new(self)?.crtc(self, output.crtc)?;
     /// crtc.mode = mode.xid;
-    /// crtc.apply(self)
+    /// crtc.apply(xhandle)
     /// ```
     ///
     pub(crate) fn apply(&mut self, handle: &mut XHandle) 
@@ -185,24 +183,21 @@ impl Crtc {
                 self.mode,
                 self.rotation as u16,
                 outputs,
-                self.outputs.len() as i32,
+                i32::try_from(self.outputs.len()).unwrap(),
             );
         }
 
         Ok(())
     }
 
-    /// Disable this crtc. Alters some of its fields.
-    pub(crate) fn disable(&mut self, handle: &mut XHandle) 
-    -> Result<(), XrandrError> 
-    {
+    /// Alters some fields to reflect the disabled state
+    /// Use apply() afterwards to actually disable the crtc
+    pub(crate) fn set_disable(&mut self) {
         self.x = 0;
         self.y = 0;
         self.mode = 0;
         self.rotation = Rotation::Normal;
         self.outputs.clear();
-
-        self.apply(handle)
     }
 
 
@@ -222,104 +217,28 @@ impl Crtc {
     }
 
     /// The most down an dright coordinates that this crtc uses
-    pub(crate) fn max_coordinates(&self) -> (u32, u32) {
+    pub(crate) fn max_coordinates(&self) -> (i32, i32) {
         assert!(self.x >= 0 && self.y >= 0,
             "max_coordinates should be called on normalized crtc");
 
         // let (w, h) = self.rot_size();
         // I think crtcs have this incorporated in their width/height fields
-        (self.x as u32 + self.width, self.y as u32 + self.height)
+        (self.x + self.width as i32, self.y + self.height as i32)
     }
 
     /// Creates a new Crtc that is offset (.x and .y) fields, by offset param
     pub(crate) fn offset(&mut self, offset: (i32, i32)) {
-        let x = self.x as i64 + offset.0 as i64;
-        let y = self.y as i64 + offset.1 as i64;
+        let x = i64::from(self.x) + i64::from(offset.0);
+        let y = i64::from(self.y) + i64::from(offset.1);
         
-        assert!(x < i32::MAX as i64 && y < i32::MAX as i64,
+        assert!(x < i64::from(i32::MAX) && y < i64::from(i32::MAX),
             "This offset would cause integer overflow");
 
         assert!(x >= 0 && y >= 0,
             "Invalid coordinates after offset");
 
-        self.x = x as i32;
-        self.y = y as i32;
-    }
-}
-
-/// A Crtc change consists of a new and an old state
-/// A change should be applied if these two differ
-pub struct Change {
-    pub old: Crtc,
-    pub new: Crtc,
-}
-
-/// The changes struct keeps track of all crtcs and how they have changed
-/// Its methods facilitate the changing of crtcs in the xrandr backend.
-pub struct Changes {
-    changes: Vec<Change>,
-}
-
-impl Changes {
-    /// Generates a `changes` vector where `old` and `new` start of identical
-    pub(crate) fn new(handle: &mut XHandle) -> Result<Self, XrandrError> {
-        let res = ScreenResources::new(handle)?;
-        let old_crtcs = res.enabled_crtcs(handle)?;
-
-        let changes = old_crtcs.into_iter()
-            .map(|c| Change { old: c.clone(), new: c })
-            .collect::<Vec<Change>>();
-
-        Ok(Self { changes })
-    }
-
-    /// Apply the differences made to the `new` crtcs
-    pub(crate) fn apply(&mut self, handle: &mut XHandle) 
-    -> Result<(), XrandrError> 
-    {
-        // Calculate a new screensize based on the new crtcs
-        let new_crtcs = self.changes.iter()
-            .map(|Change { old:_, new }| new)
-            .collect::<Vec<&Crtc>>();
-        let new_size = ScreenSize::fitting_crtcs2(handle, &new_crtcs);
-
-        // Disable crtcs that do not fit on the new screen
-        for Change { old, new:_ } in &mut self.changes {
-            if !new_size.fits_crtc(old) { 
-                eprintln!("Disabling:{:?}\n", old);
-                old.disable(handle)?; 
-            }
-        }
-
-        eprintln!("Settin screen size to: {:?}", new_size);
-        new_size.set(handle); // Perform the resize xrandr call
-
-        // Move/rotate and enable the crtcs
-        for Change { old, new } in &mut self.changes {
-            if new != old { 
-                eprintln!("Applying:{:?}\n", new);
-                new.apply(handle)?; 
-            }
-        }
-
-        Ok(())
-    }
-    
-    /// Get a reference to the new state of the crtc with id `xid`
-    pub(crate) fn get_new(&mut self, xid: XId) 
-    -> Result<&mut Crtc, XrandrError>
-    {
-        self.changes.iter_mut()
-            .map(|Change { old:_, new }| new)
-            .find(|crtc| crtc.xid == xid)
-            .ok_or(XrandrError::GetCrtc(xid))
-    }
-
-    /// Get the refences to all the new states
-    pub(crate) fn get_all_news(&mut self) -> Vec<&mut Crtc> {
-        self.changes.iter_mut()
-            .map(|Change { old:_, new }| new)
-            .collect()
+        self.x = i32::try_from(x).unwrap();
+        self.y = i32::try_from(y).unwrap();
     }
 }
 

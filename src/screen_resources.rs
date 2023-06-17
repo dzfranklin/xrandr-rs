@@ -26,7 +26,6 @@ pub struct ScreenResources {
 
 
 impl ScreenResources {
-    // TODO: better error documentation
     /// Create a handle to the `XRRScreenResources` object from libxrandr.
     /// This handle is used to query many parts of the current x11 config.
     ///
@@ -70,7 +69,6 @@ impl ScreenResources {
         })
     }
 
-    // TODO: better error documentation
     /// Gets information on all outputs
     ///
     /// # Errors
@@ -91,7 +89,6 @@ impl ScreenResources {
             .collect()
     }
 
-    // TODO: better error documentation
     /// Gets information on output with given xid
     ///
     /// # Errors
@@ -112,7 +109,6 @@ impl ScreenResources {
             .ok_or(XrandrError::GetOutputInfo(xid))
     }
 
-    // TODO: better error documentation
     /// Gets information on all crtcs
     ///
     /// # Errors
@@ -147,7 +143,6 @@ impl ScreenResources {
             .collect())
     }
 
-    // TODO: better error documentation
     /// Gets information on crtc with given xid
     ///
     /// # Errors
@@ -169,7 +164,6 @@ impl ScreenResources {
     }
 
 
-    // TODO: better error documentation
     /// Gets information on all crtcs
     ///
     /// # Errors
@@ -186,7 +180,6 @@ impl ScreenResources {
         self.modes.clone()
     }
 
-    // TODO: better error documentation
     /// Gets information on mode with given xid
     ///
     /// # Errors

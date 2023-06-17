@@ -49,7 +49,7 @@ impl From<&xrandr::XRRModeInfo> for Mode {
             else { x_mode.vTotal };
 
         let rate = x_mode.dotClock as f64 / 
-            (x_mode.hTotal as f64* v_total as f64);
+            (f64::from(x_mode.hTotal) * f64::from(v_total));
 
         Self {
             xid: x_mode.id,

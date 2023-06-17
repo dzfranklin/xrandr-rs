@@ -254,7 +254,7 @@ impl Value {
         }
     }
     fn from_edid(data: *const u8, len: u64) -> Self {
-        let edid = unsafe { slice::from_raw_parts(data, len as usize) };
+        let edid = unsafe { slice::from_raw_parts(data, len.try_into().unwrap()) };
         Self::Edid(edid.to_vec())
     }
 
@@ -300,7 +300,7 @@ impl Value {
     }
 
     unsafe fn reinterpret_as<T: Copy>(data: *const u8, len: u64) -> Vec<T> {
-        slice::from_raw_parts(data.cast::<T>(), len as usize).to_vec()
+        slice::from_raw_parts(data.cast::<T>(), len.try_into().unwrap()).to_vec()
     }
 }
 
