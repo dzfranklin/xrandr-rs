@@ -72,18 +72,26 @@ impl Property {
                 id,
             ))
             .ok_or(XrandrError::GetOutputProp(output))?
-            .as_ref()
         };
 
-        let values =
-            Self::get_values(&mut handle.sys, info, value_type, format)?;
+        let is_immutable = unsafe { real_bool(info.as_ref().immutable) };
+        let is_pending = unsafe { real_bool(info.as_ref().pending) };
+
+        let values = unsafe {
+            Self::get_values(&mut handle.sys, info.as_ref(), value_type, format)?
+        };
+
+        unsafe { 
+            xlib::XFree(info.as_ptr().cast());
+            xlib::XFree(prop.cast()) 
+        };
 
         Ok(Self {
             name,
             value,
             values,
-            is_immutable: real_bool(info.immutable),
-            is_pending: real_bool(info.pending),
+            is_immutable,
+            is_pending,
         })
     }
 

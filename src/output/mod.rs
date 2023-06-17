@@ -168,7 +168,7 @@ impl Output {
             .collect();
 
         unsafe { xlib::XFree(props_data.cast()) };
-
+        std::process::exit(0);
         props
     }
 
