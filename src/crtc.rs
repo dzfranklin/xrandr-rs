@@ -80,11 +80,11 @@ pub(crate) fn normalize_positions(crtcs: &mut Vec<Crtc>) {
 
 // A wrapper that drops the pointer if it goes out of scope.
 // Avoid having to deal with the various early returns
-struct CrtcInfo {
+struct CrtcHandle {
     ptr: ptr::NonNull<xrandr::XRRCrtcInfo>
 }
 
-impl CrtcInfo {
+impl CrtcHandle {
     fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
         let res = ScreenResourcesHandle::new(handle)?;
 
@@ -99,7 +99,7 @@ impl CrtcInfo {
     }
 }
 
-impl Drop for CrtcInfo {
+impl Drop for CrtcHandle {
     fn drop(&mut self) {
         unsafe { xrandr::XRRFreeCrtcInfo(self.ptr.as_ptr()) };
     }
@@ -126,7 +126,7 @@ impl Crtc {
     pub fn from_xid(handle: &mut XHandle, xid: XId) 
     -> Result<Self,XrandrError>
     {
-        let crtc_info = CrtcInfo::new(handle, xid)?;
+        let crtc_info = CrtcHandle::new(handle, xid)?;
 
         let xrandr::XRRCrtcInfo {
             timestamp, x, y, width, height, mode, rotation, 

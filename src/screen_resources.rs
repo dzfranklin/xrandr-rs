@@ -28,7 +28,7 @@ impl ScreenResourcesHandle {
     }
 
     pub(crate) fn ptr(&self) -> *mut x11::xrandr::XRRScreenResources {
-        return self.ptr.as_ptr()
+        self.ptr.as_ptr()
     }
 }
 
