@@ -18,7 +18,7 @@ pub use crate::crtc::{Rotation, Relation};
 pub use crate::mode::Mode;
 pub use crate::screensize::ScreenSize;
 pub use crate::monitor::Monitor;
-use crate::monitor::MonitorInfo;
+use crate::monitor::MonitorHandle;
 pub use output::{
     property::{
         Property, 
@@ -93,7 +93,7 @@ impl XHandle {
     /// ```
     ///
     pub fn monitors(&mut self) -> Result<Vec<Monitor>, XrandrError> {
-        let infos = MonitorInfo::new(self)?;
+        let infos = MonitorHandle::new(self)?;
 
         infos.as_slice()
             .iter()
@@ -227,7 +227,6 @@ impl XHandle {
     }
 
 
-    // TODO: Resize the screen after resolution change?
     // - xrandr does not seem to resize after a rotation, and this feels
     //   similar to me. I would say let the user reposition the displays
     /// Sets the mode of a given output, relative to another
@@ -423,23 +422,6 @@ impl XHandle {
                 size.height_mm,
             );
         }
-    }
-
-    // private helpers
-    pub(crate) fn res<'r, 'h>( &'h mut self,) 
-    -> Result<&'r mut xrandr::XRRScreenResources, XrandrError>
-    where 'r: 'h,
-    {
-        let res = unsafe {
-            ptr::NonNull::new(xrandr::XRRGetScreenResources(
-                self.sys.as_ptr(),
-                self.root(),
-            ))
-            .ok_or(XrandrError::GetResources)?
-            .as_mut()
-        };
-
-        Ok(res)
     }
 
     fn root(&mut self) -> c_ulong {

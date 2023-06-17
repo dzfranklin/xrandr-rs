@@ -1,4 +1,4 @@
-use std::slice;
+use std::{ptr, slice};
 use x11::xrandr;
 
 use crate::XHandle;
@@ -11,9 +11,35 @@ use crate::XId;
 use crate::XTime;
 
 
+// A wrapper that drops the pointer if it goes out of scope.
+// Avoid having to deal with the various early returns
+pub(crate) struct ScreenResourcesHandle {
+    ptr: ptr::NonNull<xrandr::XRRScreenResources>
+}
+
+impl ScreenResourcesHandle {
+    pub(crate) fn new(handle: &mut XHandle) -> Result<Self, XrandrError> {
+        let raw_ptr = unsafe { 
+            xrandr::XRRGetScreenResources(handle.sys.as_ptr(), handle.root())
+        };
+
+        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetResources)?;
+        Ok(Self { ptr })
+    }
+
+    pub(crate) fn ptr(&self) -> *mut x11::xrandr::XRRScreenResources {
+        return self.ptr.as_ptr()
+    }
+}
+
+impl Drop for ScreenResourcesHandle {
+    fn drop(&mut self) {
+        unsafe { xrandr::XRRFreeScreenResources(self.ptr.as_ptr()) };
+    }
+}
+
+
 #[derive(Debug)]
-// TODO: which IDs are possibly useful for the end user?
-// make only those public (outside of crate)
 pub struct ScreenResources {
     pub timestamp: XTime,
     pub config_timestamp: XTime,
@@ -43,28 +69,34 @@ impl ScreenResources {
     -> Result<ScreenResources, XrandrError> 
     {
         // TODO: does this need to be freed?
-        let res = handle.res()?;
+        let res = ScreenResourcesHandle::new(handle)?;
+        let xrandr::XRRScreenResources {
+            modes, nmode, 
+            crtcs, ncrtc, 
+            outputs, noutput, 
+            timestamp, configTimestamp, ..
+        } = unsafe { res.ptr.as_ref() };
 
         let x_modes: &[xrandr::XRRModeInfo] = unsafe { 
-            slice::from_raw_parts(res.modes, res.nmode as usize) };
+            slice::from_raw_parts(*modes, *nmode as usize) };
 
         let modes: Vec<Mode> = x_modes.iter()
             .map(Mode::from)
             .collect();
 
         let x_crtcs = unsafe { 
-            slice::from_raw_parts(res.crtcs, res.ncrtc as usize) };
+            slice::from_raw_parts(*crtcs, *ncrtc as usize) };
 
         let x_outputs = unsafe { 
-            slice::from_raw_parts(res.outputs, res.noutput as usize) };
+            slice::from_raw_parts(*outputs, *noutput as usize) };
 
         Ok(ScreenResources { 
-            timestamp: res.timestamp,
-            config_timestamp: res.configTimestamp,
-            ncrtc: res.ncrtc,
+            timestamp: *timestamp,
+            config_timestamp: *configTimestamp,
+            ncrtc: *ncrtc,
             crtcs: x_crtcs.to_vec(),
             outputs: x_outputs.to_vec(),
-            nmode: res.nmode,
+            nmode: *nmode,
             modes
         })
     }

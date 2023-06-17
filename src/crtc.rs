@@ -3,6 +3,7 @@ use crate::XTime;
 use crate::CURRENT_TIME;
 use crate::XHandle;
 use crate::XrandrError;
+use crate::screen_resources::ScreenResourcesHandle;
 use std::ptr;
 use std::slice;
 
@@ -80,13 +81,15 @@ pub(crate) fn normalize_positions(crtcs: &mut Vec<Crtc>) {
 // A wrapper that drops the pointer if it goes out of scope.
 // Avoid having to deal with the various early returns
 struct CrtcInfo {
-    pub ptr: ptr::NonNull<xrandr::XRRCrtcInfo>
+    ptr: ptr::NonNull<xrandr::XRRCrtcInfo>
 }
 
 impl CrtcInfo {
     fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
+        let res = ScreenResourcesHandle::new(handle)?;
+
         let raw_ptr = unsafe { 
-            xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), handle.res()?, xid)
+            xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), res.ptr(), xid)
         };
 
         let ptr = ptr::NonNull::new(raw_ptr)
@@ -123,7 +126,6 @@ impl Crtc {
     pub fn from_xid(handle: &mut XHandle, xid: XId) 
     -> Result<Self,XrandrError>
     {
-        // TODO: do the same as with outputs
         let crtc_info = CrtcInfo::new(handle, xid)?;
 
         let xrandr::XRRCrtcInfo {
@@ -172,10 +174,12 @@ impl Crtc {
             _ => self.outputs.as_mut_ptr(),
         };
 
+        let res = ScreenResourcesHandle::new(handle)?;
+
         unsafe {
             xrandr::XRRSetCrtcConfig(
                 handle.sys.as_ptr(),
-                handle.res()?,
+                res.ptr(),
                 self.xid,
                 CURRENT_TIME,
                 self.x,

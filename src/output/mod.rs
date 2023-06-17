@@ -1,5 +1,6 @@
 pub mod property;
 
+use crate::screen_resources::ScreenResourcesHandle;
 use crate::{XHandle, XrandrError, ScreenResources};
 use indexmap::IndexMap;
 use property::{Property, Value};
@@ -35,14 +36,16 @@ pub struct Output {
 
 // A wrapper that drops the pointer if it goes out of scope.
 // Avoid having to deal with the various early returns
-struct OutputInfo {
-    pub ptr: ptr::NonNull<xrandr::XRROutputInfo>
+struct OutputHandle {
+    ptr: ptr::NonNull<xrandr::XRROutputInfo>
 }
 
-impl OutputInfo {
+impl OutputHandle {
     fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
+        let res = ScreenResourcesHandle::new(handle)?;
+
         let raw_ptr = unsafe { 
-            xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), handle.res()?, xid)
+            xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), res.ptr(), xid)
         };
 
         let ptr = ptr::NonNull::new(raw_ptr)
@@ -52,7 +55,7 @@ impl OutputInfo {
     }
 }
 
-impl Drop for OutputInfo {
+impl Drop for OutputHandle {
     fn drop(&mut self) {
         unsafe { xrandr::XRRFreeOutputInfo(self.ptr.as_ptr()) };
     }
@@ -78,7 +81,7 @@ impl Output {
     pub(crate) fn from_xid(handle: &mut XHandle, xid: u64) 
     -> Result<Self, XrandrError> 
     {
-        let output_info = OutputInfo::new(handle, xid)?;
+        let output_info = OutputHandle::new(handle, xid)?;
 
         let xrandr::XRROutputInfo { 
              crtc, ncrtc, crtcs, nclone, clones, 

@@ -5,15 +5,14 @@ use crate::XHandle;
 use crate::XrandrError;
 use crate::output::Output;
 
-// TODO: implement this for other pointers in the lib?
 // A wrapper that drops the pointer if it goes out of scope.
 // Avoid having to deal with the various early returns
-pub(crate) struct MonitorInfo {
-    pub ptr: ptr::NonNull<xrandr::XRRMonitorInfo>,
-    pub count: i32,
+pub(crate) struct MonitorHandle {
+    ptr: ptr::NonNull<xrandr::XRRMonitorInfo>,
+    count: i32,
 }
 
-impl MonitorInfo {
+impl MonitorHandle {
     pub(crate) fn new(handle: &mut XHandle) -> Result<Self,XrandrError> {
         let mut count = 0;
 
@@ -46,7 +45,7 @@ impl MonitorInfo {
     }
 }
 
-impl Drop for MonitorInfo {
+impl Drop for MonitorHandle {
     fn drop(&mut self) {
         unsafe { xrandr::XRRFreeMonitors(self.ptr.as_ptr()) };
     }
