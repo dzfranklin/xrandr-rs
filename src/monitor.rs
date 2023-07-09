@@ -1,6 +1,9 @@
 use core::ptr;
 use std::slice;
 use x11::xrandr;
+#[cfg(feature= "serialize")]
+use serde::{Deserialize, Serialize};
+
 use crate::XHandle;
 use crate::XrandrError;
 use crate::output::Output;

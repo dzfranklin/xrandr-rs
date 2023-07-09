@@ -2,6 +2,8 @@ use std::convert::TryInto;
 use std::{ptr, slice};
 
 use x11::{xlib, xrandr};
+#[cfg(feature= "serialize")]
+use serde::{Deserialize, Serialize};
 
 use crate::{atom_name, real_bool, HandleSys, XHandle, XrandrError};
 

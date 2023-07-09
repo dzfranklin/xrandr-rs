@@ -7,6 +7,8 @@ use property::{Property, Value};
 use std::os::raw::c_int;
 use std::{ptr, slice};
 use x11::{xlib, xrandr};
+#[cfg(feature= "serialize")]
+use serde::{Deserialize, Serialize};
 
 use crate::CURRENT_TIME;
 use crate::XTime;
