@@ -1,12 +1,12 @@
 use core::ptr;
+#[cfg(feature = "serialize")]
+use serde::{Deserialize, Serialize};
 use std::slice;
 use x11::xrandr;
-#[cfg(feature= "serialize")]
-use serde::{Deserialize, Serialize};
 
+use crate::output::Output;
 use crate::XHandle;
 use crate::XrandrError;
-use crate::output::Output;
 
 // A wrapper that drops the pointer if it goes out of scope.
 // Avoid having to deal with the various early returns
@@ -16,35 +16,23 @@ pub(crate) struct MonitorHandle {
 }
 
 impl MonitorHandle {
-    pub(crate) fn new(handle: &mut XHandle) -> Result<Self,XrandrError> {
+    pub(crate) fn new(handle: &mut XHandle) -> Result<Self, XrandrError> {
         let mut count = 0;
 
-        let raw_ptr = unsafe {
-            xrandr::XRRGetMonitors(
-                handle.sys.as_ptr(),
-                handle.root(),
-                0,
-                &mut count,
-            )
-        };
-        
+        let raw_ptr =
+            unsafe { xrandr::XRRGetMonitors(handle.sys.as_ptr(), handle.root(), 0, &mut count) };
+
         if count == -1 {
             return Err(XrandrError::GetMonitors);
         }
-        
-        let ptr = ptr::NonNull::new(raw_ptr)
-            .ok_or(XrandrError::GetMonitors)?;
+
+        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetMonitors)?;
 
         Ok(Self { ptr, count })
     }
 
     pub(crate) fn as_slice(&self) -> &[xrandr::XRRMonitorInfo] {
-        unsafe { 
-            slice::from_raw_parts_mut(
-                self.ptr.as_ptr(), 
-                self.count as usize
-            )
-        }
+        unsafe { slice::from_raw_parts_mut(self.ptr.as_ptr(), self.count as usize) }
     }
 }
 
@@ -70,4 +58,3 @@ pub struct Monitor {
     /// can have more than one output.
     pub outputs: Vec<Output>,
 }
-
