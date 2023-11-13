@@ -232,17 +232,16 @@ impl Crtc {
 
     /// Creates a new Crtc that is offset (.x and .y) fields, by offset param
     pub(crate) fn offset(&mut self, offset: (i32, i32)) {
-        let x = i64::from(self.x) + i64::from(offset.0);
-        let y = i64::from(self.y) + i64::from(offset.1);
-        
-        assert!(x < i64::from(i32::MAX) && y < i64::from(i32::MAX),
-            "This offset would cause integer overflow");
+        let x = i32::checked_add(self.x, offset.0)
+            .expect("Display should not be positioned outside canvas range");
+        let y = i32::checked_add(self.y, offset.1)
+            .expect("Display should not be positioned outside canvas range");
 
         assert!(x >= 0 && y >= 0,
             "Invalid coordinates after offset");
 
-        self.x = i32::try_from(x).unwrap();
-        self.y = i32::try_from(y).unwrap();
+        self.x = x;
+        self.y = y;
     }
 }
 
