@@ -6,9 +6,9 @@ use crate::XId;
 const RR_INTERLACE: u64 = 0x0000_0010;
 const RR_DOUBLE_SCAN: u64 = 0x0000_0020;
 
-// Modes correspond to the various display configurations the outputs 
+// Modes correspond to the various display configurations the outputs
 // connected to your machine are capable of displaying. This mostly comes
-// down to resolution/refresh rates, but the `flags` field in particular 
+// down to resolution/refresh rates, but the `flags` field in particular
 // also encodes whether this mode is interlaced/doublescan
 #[derive(Debug, Clone)]
 pub struct Mode {
@@ -28,28 +28,27 @@ pub struct Mode {
     pub rate: f64,
 }
 
-
 impl From<&xrandr::XRRModeInfo> for Mode {
     fn from(x_mode: &xrandr::XRRModeInfo) -> Self {
-        let name_b = unsafe {
-            slice::from_raw_parts(
-                x_mode.name as *const u8,
-                x_mode.nameLength as usize,
-            )
-        };
-    
+        let name_b =
+            unsafe { slice::from_raw_parts(x_mode.name as *const u8, x_mode.nameLength as usize) };
+
         // Calculate the refresh rate for this mode
         // This is not given by xrandr, but tends to be useful for end-users
-        assert!(x_mode.hTotal != 0 && x_mode.vTotal != 0,
-            "Framerate calculation would divide by zero");
+        assert!(
+            x_mode.hTotal != 0 && x_mode.vTotal != 0,
+            "Framerate calculation would divide by zero"
+        );
 
-        let v_total = 
-            if x_mode.modeFlags & RR_DOUBLE_SCAN != 0 { x_mode.vTotal * 2 }
-            else if x_mode.modeFlags & RR_INTERLACE != 0 { x_mode.vTotal / 2 }
-            else { x_mode.vTotal };
+        let v_total = if x_mode.modeFlags & RR_DOUBLE_SCAN != 0 {
+            x_mode.vTotal * 2
+        } else if x_mode.modeFlags & RR_INTERLACE != 0 {
+            x_mode.vTotal / 2
+        } else {
+            x_mode.vTotal
+        };
 
-        let rate = x_mode.dotClock as f64 / 
-            (f64::from(x_mode.hTotal) * f64::from(v_total));
+        let rate = x_mode.dotClock as f64 / (f64::from(x_mode.hTotal) * f64::from(v_total));
 
         Self {
             xid: x_mode.id,
@@ -69,4 +68,3 @@ impl From<&xrandr::XRRModeInfo> for Mode {
         }
     }
 }
-

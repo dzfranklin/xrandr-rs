@@ -10,7 +10,6 @@ use std::slice;
 use x11::xrandr;
 use std::convert::TryFrom;
 
-
 // A Crtc can display a mode in one of 4 rotations
 #[derive(PartialEq, Eq, Copy, Debug, Clone)]
 pub enum Rotation {
@@ -44,8 +43,7 @@ pub enum Relation {
     SameAs,
 }
 
-
-// Crtcs define a region of pixels you can see. The Crtc controls the size 
+// Crtcs define a region of pixels you can see. The Crtc controls the size
 // and timing of the signal. To this end, the Crtc struct in xrandr maintains
 // a list of attributes that usually correspond to a physical display.
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -63,16 +61,19 @@ pub struct Crtc {
     pub possible: Vec<XId>,
 }
 
-
 /// Normalizes a set of Crtcs by making sure the top left pixel of the screen
 /// is at (0,0). This is needed after changing positions/rotations.
 pub(crate) fn normalize_positions(crtcs: &mut Vec<Crtc>) {
-    if crtcs.is_empty() { return };
+    if crtcs.is_empty() {
+        return;
+    };
 
     let left = crtcs.iter().map(|p| p.x).min().unwrap();
     let top = crtcs.iter().map(|p| p.y).min().unwrap();
-    if (top,left) == (0,0) { return };
-    
+    if (top, left) == (0, 0) {
+        return;
+    };
+
     for c in crtcs.iter_mut() {
         c.offset((-left, -top));
     }
@@ -81,19 +82,16 @@ pub(crate) fn normalize_positions(crtcs: &mut Vec<Crtc>) {
 // A wrapper that drops the pointer if it goes out of scope.
 // Avoid having to deal with the various early returns
 struct CrtcHandle {
-    ptr: ptr::NonNull<xrandr::XRRCrtcInfo>
+    ptr: ptr::NonNull<xrandr::XRRCrtcInfo>,
 }
 
 impl CrtcHandle {
     fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
         let res = ScreenResourcesHandle::new(handle)?;
 
-        let raw_ptr = unsafe { 
-            xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), res.ptr(), xid)
-        };
+        let raw_ptr = unsafe { xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), res.ptr(), xid) };
 
-        let ptr = ptr::NonNull::new(raw_ptr)
-            .ok_or(XrandrError::GetCrtcInfo(xid))?;
+        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetCrtcInfo(xid))?;
 
         Ok(Self { ptr })
     }
@@ -105,9 +103,8 @@ impl Drop for CrtcHandle {
     }
 }
 
-
 impl Crtc {
-    /// Open a handle to the lib-xrandr backend. This will be 
+    /// Open a handle to the lib-xrandr backend. This will be
     /// used for nearly all interactions with the xrandr lib
     ///
     /// # Arguments
@@ -123,23 +120,29 @@ impl Crtc {
     /// let mon1 = xhandle.monitors()?[0];
     /// ```
     ///
-    pub fn from_xid(handle: &mut XHandle, xid: XId) 
-    -> Result<Self,XrandrError>
-    {
+    pub fn from_xid(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
         let crtc_info = CrtcHandle::new(handle, xid)?;
 
         let xrandr::XRRCrtcInfo {
-            timestamp, x, y, width, height, mode, rotation, 
-            noutput, outputs, rotations, npossible, possible
+            timestamp,
+            x,
+            y,
+            width,
+            height,
+            mode,
+            rotation,
+            noutput,
+            outputs,
+            rotations,
+            npossible,
+            possible,
         } = unsafe { crtc_info.ptr.as_ref() };
 
         let rotation = Rotation::try_from(*rotation)?;
 
-        let outputs = unsafe { 
-            slice::from_raw_parts(*outputs, *noutput as usize) };
+        let outputs = unsafe { slice::from_raw_parts(*outputs, *noutput as usize) };
 
-        let possible = unsafe { 
-            slice::from_raw_parts(*possible, *npossible as usize) };
+        let possible = unsafe { slice::from_raw_parts(*possible, *npossible as usize) };
 
         Ok(Self {
             xid,
@@ -156,7 +159,7 @@ impl Crtc {
         })
     }
 
-    /// Apply the current fields of this crtc. `&mut self` needed to create a 
+    /// Apply the current fields of this crtc. `&mut self` needed to create a
     /// mut pointer to outputs, which lib-xrandr seems to require.
     /// # Examples
     /// ```
@@ -166,9 +169,7 @@ impl Crtc {
     /// crtc.apply(xhandle)
     /// ```
     ///
-    pub(crate) fn apply(&mut self, handle: &mut XHandle) 
-    -> Result<(), XrandrError> 
-    {
+    pub(crate) fn apply(&mut self, handle: &mut XHandle) -> Result<(), XrandrError> {
         let outputs = match self.outputs.len() {
             0 => std::ptr::null_mut(),
             _ => self.outputs.as_mut_ptr(),
@@ -204,26 +205,28 @@ impl Crtc {
         self.outputs.clear();
     }
 
-
     /// Width and height, accounting for a given rotation
-    #[must_use] pub fn rotated_size(&self, rot: Rotation) -> (u32, u32) {
+    #[must_use]
+    pub fn rotated_size(&self, rot: Rotation) -> (u32, u32) {
         let (w, h) = (self.width, self.height);
 
         let (old_w, old_h) = match self.rotation {
-            Rotation::Normal | Rotation::Inverted   => (w, h),
-            Rotation::Left | Rotation::Right        => (h, w),
+            Rotation::Normal | Rotation::Inverted => (w, h),
+            Rotation::Left | Rotation::Right => (h, w),
         };
 
         match rot {
-            Rotation::Normal | Rotation::Inverted   => (old_w, old_h),
-            Rotation::Left | Rotation::Right        => (old_h, old_w),
+            Rotation::Normal | Rotation::Inverted => (old_w, old_h),
+            Rotation::Left | Rotation::Right => (old_h, old_w),
         }
     }
 
     /// The most down an dright coordinates that this crtc uses
     pub(crate) fn max_coordinates(&self) -> (i32, i32) {
-        assert!(self.x >= 0 && self.y >= 0,
-            "max_coordinates should be called on normalized crtc");
+        assert!(
+            self.x >= 0 && self.y >= 0,
+            "max_coordinates should be called on normalized crtc"
+        );
 
         // let (w, h) = self.rot_size();
         // I think crtcs have this incorporated in their width/height fields
@@ -237,11 +240,9 @@ impl Crtc {
         let y = i32::checked_add(self.y, offset.1)
             .expect("Display should not be positioned outside canvas range");
 
-        assert!(x >= 0 && y >= 0,
-            "Invalid coordinates after offset");
+        assert!(x >= 0 && y >= 0, "Invalid coordinates after offset");
 
         self.x = x;
         self.y = y;
     }
 }
-

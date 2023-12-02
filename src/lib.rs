@@ -6,7 +6,6 @@ use std::ptr;
 use itertools::Itertools;
 use itertools::EitherOrBoth as ZipEntry;
 
-
 use crtc::normalize_positions;
 pub use indexmap;
 pub use screen_resources::ScreenResources;
@@ -20,37 +19,28 @@ pub use crate::screensize::ScreenSize;
 pub use crate::monitor::Monitor;
 use crate::monitor::MonitorHandle;
 pub use output::{
-    property::{
-        Property, 
-        Value, 
-        Values, 
-        Range, 
-        Ranges, 
-        Supported,
-    },
-    Output, 
+    property::{Property, Value, Values, Range, Ranges, Supported},
+    Output,
 };
 
-mod screen_resources;
-mod screensize;
+mod crtc;
+mod mode;
 mod monitor;
 mod output;
-mod mode;
-mod crtc;
+mod screen_resources;
+mod screensize;
 
-
-// All retrieved information is timestamped by when that information was 
-// last changed in the backend. If we alter an object (e.g. crtc, output) we 
-// have to pass the timestamp we got with it. If the x backend detects that 
-// changes have occured since we retrieved the information, our new change 
+// All retrieved information is timestamped by when that information was
+// last changed in the backend. If we alter an object (e.g. crtc, output) we
+// have to pass the timestamp we got with it. If the x backend detects that
+// changes have occured since we retrieved the information, our new change
 // will not go through.
 pub type XTime = c_ulong;
 // Xrandr seems to want the time `0` when calling setter functions
 const CURRENT_TIME: c_ulong = 0;
-// Unique identifiers for the various objects in the x backend 
+// Unique identifiers for the various objects in the x backend
 // (crtcs,outputs,modes, etc.)
 pub type XId = c_ulong;
-
 
 // The main handle consists simply of a pointer to the display
 type HandleSys = ptr::NonNull<xlib::Display>;
@@ -60,7 +50,7 @@ pub struct XHandle {
 }
 
 impl XHandle {
-    /// Open a handle to the lib-xrandr backend. This will be 
+    /// Open a handle to the lib-xrandr backend. This will be
     /// used for nearly all interactions with the xrandr lib
     ///
     /// # Errors
@@ -68,19 +58,18 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let xhandle = XHandle.open()?;
+    /// let xhandle = XHandle::open()?;
     /// let mon1 = xhandle.monitors()?[0];
     /// ```
     ///
     pub fn open() -> Result<Self, XrandrError> {
         // XOpenDisplay argument is screen name
         // Null pointer gets first display?
-        let sys = ptr::NonNull::new(unsafe{ xlib::XOpenDisplay(ptr::null()) })
+        let sys = ptr::NonNull::new(unsafe { xlib::XOpenDisplay(ptr::null()) })
             .ok_or(XrandrError::Open)?;
 
         Ok(Self { sys })
     }
-
 
     /// List every monitor
     ///
@@ -95,12 +84,11 @@ impl XHandle {
     pub fn monitors(&mut self) -> Result<Vec<Monitor>, XrandrError> {
         let infos = MonitorHandle::new(self)?;
 
-        infos.as_slice()
+        infos
+            .as_slice()
             .iter()
             .map(|sys| {
-                let outputs = unsafe {
-                    Output::from_list(self, sys.outputs, sys.noutput)
-                }?;
+                let outputs = unsafe { Output::from_list(self, sys.outputs, sys.noutput) }?;
 
                 Ok(Monitor {
                     name: atom_name(&mut self.sys, sys.name)?,
@@ -118,7 +106,6 @@ impl XHandle {
             .collect::<Result<_, _>>()
     }
 
-
     /// List every monitor's outputs
     ///
     /// # Errors
@@ -133,13 +120,9 @@ impl XHandle {
         ScreenResources::new(self)?.outputs(self)
     }
 
-
     // TODO: this seems to be more complicated in xrandr.c
     // Finds an available Crtc for a given (disabled) output
-    fn find_available_crtc(
-        &mut self, o: &Output) 
-        -> Result<Crtc, XrandrError> 
-    {
+    fn find_available_crtc(&mut self, o: &Output) -> Result<Crtc, XrandrError> {
         let res = ScreenResources::new(self)?;
         let crtcs = res.crtcs(self)?;
 
@@ -151,7 +134,6 @@ impl XHandle {
 
         Err(XrandrError::NoCrtcAvailable)
     }
-
 
     /// Enable the given output by setting it to its preferred mode
     ///
@@ -165,9 +147,13 @@ impl XHandle {
     /// ```
     ///
     pub fn enable(&mut self, output: &Output) -> Result<(), XrandrError> {
-        if output.current_mode.is_some() { return Ok(()) }
+        if output.current_mode.is_some() {
+            return Ok(());
+        }
 
-        let target_mode = output.preferred_modes.first()
+        let target_mode = output
+            .preferred_modes
+            .first()
             .ok_or(XrandrError::NoPreferredModes(output.xid))?;
 
         let mut crtc = self.find_available_crtc(output)?;
@@ -205,7 +191,6 @@ impl XHandle {
         self.apply_new_crtcs(&mut [crtc])
     }
 
-
     /// Sets the given output as the primary output
     ///
     /// # Errors
@@ -219,13 +204,9 @@ impl XHandle {
     ///
     pub fn set_primary(&mut self, o: &Output) {
         unsafe {
-            xrandr::XRRSetOutputPrimary(
-                self.sys.as_ptr(), 
-                self.root(), 
-                o.xid);
+            xrandr::XRRSetOutputPrimary(self.sys.as_ptr(), self.root(), o.xid);
         }
     }
-
 
     // - xrandr does not seem to resize after a rotation, and this feels
     //   similar to me. I would say let the user reposition the displays
@@ -245,20 +226,15 @@ impl XHandle {
     /// xhandle.set_mode(dp_1, mode)?;
     /// ```
     ///
-    pub fn set_mode(
-        &mut self,
-        output: &Output,
-        mode: &Mode) 
-        -> Result<(), XrandrError> 
-    {
-        let crtc_id = output.crtc
+    pub fn set_mode(&mut self, output: &Output, mode: &Mode) -> Result<(), XrandrError> {
+        let crtc_id = output
+            .crtc
             .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
         let mut crtc = ScreenResources::new(self)?.crtc(self, crtc_id)?;
 
         crtc.mode = mode.xid;
         self.apply_new_crtcs(&mut [crtc])
     }
-
 
     /// Sets the position of a given output, relative to another
     ///
@@ -281,18 +257,19 @@ impl XHandle {
         &mut self,
         output: &Output,
         relation: &Relation,
-        relative_output: &Output) 
-        -> Result<(), XrandrError> 
-    {
-        let crtc_id = output.crtc
+        relative_output: &Output,
+    ) -> Result<(), XrandrError> {
+        let crtc_id = output
+            .crtc
             .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
-        let rel_crtc_id = relative_output.crtc
+        let rel_crtc_id = relative_output
+            .crtc
             .ok_or(XrandrError::OutputDisabled(relative_output.name.clone()))?;
 
         let res = ScreenResources::new(self)?;
         let mut crtc = res.crtc(self, crtc_id)?;
         let rel_crtc = res.crtc(self, rel_crtc_id)?;
-        
+
         // Calculate new (x,y) based on:
         // - own width/height & relative output's width/height/x/y
         let (w, h) = (crtc.width as i32, crtc.height as i32);
@@ -300,16 +277,15 @@ impl XHandle {
         let (rel_x, rel_y) = (rel_crtc.x, rel_crtc.y);
 
         (crtc.x, crtc.y) = match relation {
-            Relation::LeftOf  => ( rel_x - w     , rel_y         ),
-            Relation::RightOf => ( rel_x + rel_w , rel_y         ),
-            Relation::Above   => ( rel_x         , rel_y - h     ),
-            Relation::Below   => ( rel_x         , rel_y + rel_h ),
-            Relation::SameAs  => ( rel_x         , rel_y         ),
+            Relation::LeftOf => (rel_x - w, rel_y),
+            Relation::RightOf => (rel_x + rel_w, rel_y),
+            Relation::Above => (rel_x, rel_y - h),
+            Relation::Below => (rel_x, rel_y + rel_h),
+            Relation::SameAs => (rel_x, rel_y),
         };
 
         self.apply_new_crtcs(&mut [crtc])
     }
-
 
     /// Sets the position of a given output, relative to another
     ///
@@ -331,9 +307,10 @@ impl XHandle {
         output: &Output,
         rotation: &Rotation,
     ) -> Result<(), XrandrError> {
-        let crtc_id = output.crtc
+        let crtc_id = output
+            .crtc
             .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
-        
+
         let res = ScreenResources::new(self)?;
         let mut crtc = res.crtc(self, crtc_id)?;
 
@@ -343,26 +320,23 @@ impl XHandle {
         self.apply_new_crtcs(&mut [crtc])
     }
 
-
     /// Applies some set of altered crtcs
     /// Due to xrandr's structure, changing one or more crtcs properly can be
     /// quite complicated. One should therefore call this function on any crtcs
     /// that you want to change.
     /// # Arguments
-    /// * `changes` 
+    /// * `changes`
     ///     Altered crtcs. Must be mutable because of crct.apply() calls.
     ///
-    fn apply_new_crtcs(
-        &mut self,
-        changed: &mut [Crtc])
-        -> Result<(), XrandrError>
-    {
+    fn apply_new_crtcs(&mut self, changed: &mut [Crtc]) -> Result<(), XrandrError> {
         let res = ScreenResources::new(self)?;
         let old_crtcs = res.enabled_crtcs(self)?;
 
         // Construct new crtcs out of the old ones and the new where provided
         let mut changed_map: HashMap<XId, Crtc> = HashMap::new();
-        changed.iter().cloned().for_each(|c| { changed_map.insert(c.xid, c); });
+        changed.iter().cloned().for_each(|c| {
+            changed_map.insert(c.xid, c);
+        });
 
         let mut new_crtcs: Vec<Crtc> = Vec::new();
         for crtc in &old_crtcs {
@@ -371,7 +345,7 @@ impl XHandle {
                 Some(c) => new_crtcs.push(c.clone()),
             }
         }
-        new_crtcs.extend(changed_map.drain().map(|(_,v)| v));
+        new_crtcs.extend(changed_map.drain().map(|(_, v)| v));
 
         // In case the top-left corner is no longer at (0,0), renormalize
         normalize_positions(&mut new_crtcs);
@@ -383,24 +357,26 @@ impl XHandle {
         let mut old_crtcs = old_crtcs;
         for crtc in &mut old_crtcs {
             if !new_size.fits_crtc(crtc) {
-                crtc.set_disable(); 
+                crtc.set_disable();
                 crtc.apply(self)?;
             }
         }
         self.set_screensize(&new_size);
 
-        // Find the crtcs that were changed. Done this late to also account 
+        // Find the crtcs that were changed. Done this late to also account
         // for crtcs that were altered by normalize_positions()
         let mut to_apply: Vec<&mut Crtc> = Vec::new();
         for pair in old_crtcs.iter().zip_longest(new_crtcs.iter_mut()) {
             match pair {
-                ZipEntry::Both(old, new) => { 
+                ZipEntry::Both(old, new) => {
                     assert!(old.xid == new.xid, "invalid new_crtcs");
                     if new.timestamp < old.timestamp {
                         return Err(XrandrError::CrtcChanged(new.xid));
                     }
-                    if new != old { to_apply.push(new); }
-                },
+                    if new != old {
+                        to_apply.push(new);
+                    }
+                }
                 ZipEntry::Right(new) => to_apply.push(new),
                 ZipEntry::Left(_) => unreachable!("invalid new_crtcs"),
             }
@@ -429,29 +405,23 @@ impl XHandle {
     }
 }
 
-
 impl Drop for XHandle {
     fn drop(&mut self) {
         unsafe { xlib::XCloseDisplay(self.sys.as_ptr()) };
     }
 }
 
-
-
 fn real_bool(sys: xlib::Bool) -> bool {
-    assert!(sys == 0 || sys == 1, 
-        "Integer larger than 1 does not represent a bool");
+    assert!(
+        sys == 0 || sys == 1,
+        "Integer larger than 1 does not represent a bool"
+    );
     sys == 1
 }
 
-
-fn atom_name(
-    handle: &mut HandleSys,
-    atom: xlib::Atom,
-) -> Result<String, XrandrError> {
-    let chars =
-        ptr::NonNull::new(unsafe { xlib::XGetAtomName(handle.as_ptr(), atom) })
-            .ok_or(XrandrError::GetAtomName(atom))?;
+fn atom_name(handle: &mut HandleSys, atom: xlib::Atom) -> Result<String, XrandrError> {
+    let chars = ptr::NonNull::new(unsafe { xlib::XGetAtomName(handle.as_ptr(), atom) })
+        .ok_or(XrandrError::GetAtomName(atom))?;
 
     let name = unsafe { CStr::from_ptr(chars.as_ptr()) }
         .to_string_lossy()
@@ -463,7 +433,6 @@ fn atom_name(
 
     Ok(name)
 }
-
 
 #[derive(Error, Debug)]
 pub enum XrandrError {
@@ -493,13 +462,13 @@ pub enum XrandrError {
 
     #[error("Call to XRRGetCrtcInfo for CRTC with xid {0} failed")]
     GetCrtcInfo(xlib::XID),
-    
+
     #[error("Failed to get Crtc: No Crtc with ID {0}")]
     GetCrtc(xlib::XID),
 
     #[error("Call to XRRGetOutputInfo for output with xid {0} failed")]
     GetOutputInfo(xlib::XID),
-    
+
     #[error("No preferred modes found for output with xid {0}")]
     NoPreferredModes(xlib::XID),
 
@@ -512,7 +481,6 @@ pub enum XrandrError {
     #[error("Failed to name of atom {0}")]
     GetAtomName(xlib::Atom),
 }
-
 
 #[cfg(test)]
 mod tests {
