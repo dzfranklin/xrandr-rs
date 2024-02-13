@@ -42,7 +42,7 @@ impl Drop for MonitorHandle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Monitor {
     pub name: String,

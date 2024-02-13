@@ -14,7 +14,7 @@ use crate::CURRENT_TIME;
 use crate::XTime;
 use crate::XId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Output {
     pub xid: XId,

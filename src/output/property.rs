@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{atom_name, real_bool, HandleSys, XHandle, XrandrError};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Property {
     pub name: String,
@@ -221,7 +221,7 @@ impl From<i32> for ValueFormat {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Value {
     Edid(Vec<u8>),
@@ -291,7 +291,7 @@ impl Value {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Values {
     Range(Ranges),
@@ -320,7 +320,7 @@ impl From<Supported> for Values {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Ranges {
     Atom(Vec<Range<String>>),
@@ -332,7 +332,7 @@ pub enum Ranges {
     Cardinal32(Vec<Range<u32>>),
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Range<T> {
     pub lower: T,
@@ -398,7 +398,7 @@ impl Ranges {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Supported {
     Atom(Vec<String>),
