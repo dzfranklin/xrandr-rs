@@ -35,7 +35,7 @@ impl Drop for ScreenResourcesHandle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScreenResources {
     pub timestamp: XTime,
     pub config_timestamp: XTime,
