@@ -1,11 +1,11 @@
 pub mod property;
 
-use crate::screen_resources::ScreenResourcesHandle;
 use crate::{XHandle, XrandrError, ScreenResources};
 use indexmap::IndexMap;
 use property::{Property, Value};
+use x11::xrandr::XRROutputInfo;
 use std::os::raw::c_int;
-use std::{ptr, slice};
+use std::slice;
 use x11::{xlib, xrandr};
 #[cfg(feature = "serialize")]
 use serde::{Deserialize, Serialize};
@@ -34,29 +34,12 @@ pub struct Output {
     pub current_mode: Option<XId>,
 }
 
-// A wrapper that drops the pointer if it goes out of scope.
-// Avoid having to deal with the various early returns
-struct OutputHandle {
-    ptr: ptr::NonNull<xrandr::XRROutputInfo>,
-}
-
-impl OutputHandle {
-    fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
-        let res = ScreenResourcesHandle::new(handle)?;
-
-        let raw_ptr = unsafe { xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), res.ptr(), xid) };
-
-        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetOutputInfo(xid))?;
-
-        Ok(Self { ptr })
-    }
-}
-
-impl Drop for OutputHandle {
-    fn drop(&mut self) {
-        unsafe { xrandr::XRRFreeOutputInfo(self.ptr.as_ptr()) };
-    }
-}
+// TODO: replace this
+// impl Drop for OutputHandle {
+//     fn drop(&mut self) {
+//         unsafe { xrandr::XRRFreeOutputInfo(self.ptr.as_ptr()) };
+//     }
+// }
 
 impl Output {
     /// Get the Output's EDID property, if it exists.
@@ -74,9 +57,7 @@ impl Output {
         })
     }
 
-    pub(crate) fn from_xid(handle: &mut XHandle, xid: u64) -> Result<Self, XrandrError> {
-        let output_info = OutputHandle::new(handle, xid)?;
-
+    pub(crate) fn new(handle: &mut XHandle, output_info: &XRROutputInfo, xid: u64) -> Result<Self, XrandrError> {
         let xrandr::XRROutputInfo {
             crtc,
             ncrtc,
@@ -93,7 +74,7 @@ impl Output {
             mm_height,
             subpixel_order,
             ..
-        } = unsafe { output_info.ptr.as_ref() };
+        } = &output_info;
 
         let is_primary =
             xid == unsafe { xrandr::XRRGetOutputPrimary(handle.sys.as_ptr(), handle.root()) };
@@ -101,21 +82,15 @@ impl Output {
         let clones = unsafe { slice::from_raw_parts(*clones, *nclone as usize) };
 
         let modes = unsafe { slice::from_raw_parts(*modes, *nmode as usize) };
-
         let preferred_modes = modes[0..*npreferred as usize].to_vec();
 
         let crtcs = unsafe { slice::from_raw_parts(*crtcs, *ncrtc as usize) };
-
         let crtc_id = if *crtc == 0 { None } else { Some(*crtc) };
-
         let curr_crtc = ScreenResources::new(handle)?.crtc(handle, *crtc).ok();
-
         let current_mode =
             curr_crtc.and_then(|crtc_info| modes.iter().copied().find(|&m| m == crtc_info.mode));
 
-        // Name processing
         let name_b = unsafe { slice::from_raw_parts(*name as *const u8, *nameLen as usize) };
-
         let name = String::from_utf8_lossy(name_b).to_string();
         let properties = Self::get_props(handle, xid)?;
         let connected = c_int::from(*connection) == xrandr::RR_Connected;
@@ -166,12 +141,13 @@ impl Output {
 
     pub(crate) unsafe fn from_list(
         handle: &mut XHandle,
+        resources: &ScreenResources,
         data: *mut xrandr::RROutput,
         len: c_int,
     ) -> Result<Vec<Output>, XrandrError> {
         slice::from_raw_parts(data, len as usize)
             .iter()
-            .map(|xid| Output::from_xid(handle, *xid))
+            .map(|xid| resources.output(handle, *xid))
             .collect()
     }
 }

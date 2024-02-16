@@ -83,12 +83,13 @@ impl XHandle {
     ///
     pub fn monitors(&mut self) -> Result<Vec<Monitor>, XrandrError> {
         let infos = MonitorHandle::new(self)?;
+        let res = ScreenResources::new(self)?;
 
         infos
             .as_slice()
             .iter()
             .map(|sys| {
-                let outputs = unsafe { Output::from_list(self, sys.outputs, sys.noutput) }?;
+                let outputs = unsafe { Output::from_list(self, &res, sys.outputs, sys.noutput) }?;
 
                 Ok(Monitor {
                     name: atom_name(&mut self.sys, sys.name)?,
@@ -329,7 +330,7 @@ impl XHandle {
     ///     Altered crtcs. Must be mutable because of crct.apply() calls.
     ///
     fn apply_new_crtcs(&mut self, changed: &mut [Crtc]) -> Result<(), XrandrError> {
-        let res = ScreenResources::new(self)?;
+        let mut res = ScreenResources::new(self)?;
         let old_crtcs = res.enabled_crtcs(self)?;
 
         // Construct new crtcs out of the old ones and the new where provided
@@ -358,7 +359,7 @@ impl XHandle {
         for crtc in &mut old_crtcs {
             if !new_size.fits_crtc(crtc) {
                 crtc.set_disable();
-                crtc.apply(self)?;
+                res.set_crtc_config(self, crtc)?;
             }
         }
         self.set_screensize(&new_size);
@@ -383,7 +384,7 @@ impl XHandle {
         }
 
         // Move and re-enable the crtcs
-        to_apply.iter_mut().try_for_each(|c| c.apply(self))
+        to_apply.iter_mut().try_for_each(|c| res.set_crtc_config(self, c))
     }
 
     /// Sets the screen size in the x backend

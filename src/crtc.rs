@@ -1,10 +1,6 @@
 use crate::XId;
 use crate::XTime;
-use crate::CURRENT_TIME;
-use crate::XHandle;
 use crate::XrandrError;
-use crate::screen_resources::ScreenResourcesHandle;
-use std::ptr;
 use std::slice;
 
 use x11::xrandr;
@@ -79,50 +75,8 @@ pub(crate) fn normalize_positions(crtcs: &mut Vec<Crtc>) {
     }
 }
 
-// A wrapper that drops the pointer if it goes out of scope.
-// Avoid having to deal with the various early returns
-struct CrtcHandle {
-    ptr: ptr::NonNull<xrandr::XRRCrtcInfo>,
-}
-
-impl CrtcHandle {
-    fn new(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
-        let res = ScreenResourcesHandle::new(handle)?;
-
-        let raw_ptr = unsafe { xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), res.ptr(), xid) };
-
-        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetCrtcInfo(xid))?;
-
-        Ok(Self { ptr })
-    }
-}
-
-impl Drop for CrtcHandle {
-    fn drop(&mut self) {
-        unsafe { xrandr::XRRFreeCrtcInfo(self.ptr.as_ptr()) };
-    }
-}
-
 impl Crtc {
-    /// Open a handle to the lib-xrandr backend. This will be
-    /// used for nearly all interactions with the xrandr lib
-    ///
-    /// # Arguments
-    /// * `handle` - The xhandle to make the x calls with
-    /// * `xid` - The internal XID of the requested crtc
-    ///
-    /// # Errors
-    /// * `XrandrError::GetCrtc(xid)` - Could not find this xid.
-    ///
-    /// # Examples
-    /// ```
-    /// let xhandle = XHandle.open()?;
-    /// let mon1 = xhandle.monitors()?[0];
-    /// ```
-    ///
-    pub fn from_xid(handle: &mut XHandle, xid: XId) -> Result<Self, XrandrError> {
-        let crtc_info = CrtcHandle::new(handle, xid)?;
-
+    pub(crate) fn new(crtc_info: &xrandr::XRRCrtcInfo, xid: XId) -> Result<Self, XrandrError> {
         let xrandr::XRRCrtcInfo {
             timestamp,
             x,
@@ -136,12 +90,10 @@ impl Crtc {
             rotations,
             npossible,
             possible,
-        } = unsafe { crtc_info.ptr.as_ref() };
+        } = &crtc_info;
 
         let rotation = Rotation::try_from(*rotation)?;
-
         let outputs = unsafe { slice::from_raw_parts(*outputs, *noutput as usize) };
-
         let possible = unsafe { slice::from_raw_parts(*possible, *npossible as usize) };
 
         Ok(Self {
@@ -159,44 +111,8 @@ impl Crtc {
         })
     }
 
-    /// Apply the current fields of this crtc. `&mut self` needed to create a
-    /// mut pointer to outputs, which lib-xrandr seems to require.
-    /// # Examples
-    /// ```
-    /// // Sets new mode on the crtc of some output
-    /// let mut crtc = ScreenResources::new(self)?.crtc(self, output.crtc)?;
-    /// crtc.mode = mode.xid;
-    /// crtc.apply(xhandle)
-    /// ```
-    ///
-    pub(crate) fn apply(&mut self, handle: &mut XHandle) -> Result<(), XrandrError> {
-        let outputs = match self.outputs.len() {
-            0 => std::ptr::null_mut(),
-            _ => self.outputs.as_mut_ptr(),
-        };
-
-        let res = ScreenResourcesHandle::new(handle)?;
-
-        unsafe {
-            xrandr::XRRSetCrtcConfig(
-                handle.sys.as_ptr(),
-                res.ptr(),
-                self.xid,
-                CURRENT_TIME,
-                self.x,
-                self.y,
-                self.mode,
-                self.rotation as u16,
-                outputs,
-                i32::try_from(self.outputs.len()).unwrap(),
-            );
-        }
-
-        Ok(())
-    }
-
     /// Alters some fields to reflect the disabled state
-    /// Use apply() afterwards to actually disable the crtc
+    /// Use ScreenResources::set_crtc_config() afterwards to actually disable the crtc
     pub(crate) fn set_disable(&mut self) {
         self.x = 0;
         self.y = 0;
@@ -229,7 +145,7 @@ impl Crtc {
         );
 
         // let (w, h) = self.rot_size();
-        // I think crtcs have this incorporated in their width/height fields
+        // It seems crtcs have the above incorporated in their width/height fields
         (self.x + self.width as i32, self.y + self.height as i32)
     }
 
