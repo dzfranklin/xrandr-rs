@@ -182,6 +182,9 @@ impl ScreenResources {
     /// ```
     ///
     pub fn crtc(&self, handle: &mut XHandle, xid: XId) -> Result<Crtc, XrandrError> {
+        if !self.crtcs.contains(&xid) {
+            return Err(XrandrError::GetCrtc(xid));
+        }
         Crtc::from_xid(handle, xid)
     }
 
