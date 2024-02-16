@@ -1,4 +1,5 @@
 use std::{ptr, slice};
+use itertools::Itertools;
 use x11::xrandr;
 
 use crate::XHandle;
@@ -146,10 +147,15 @@ impl ScreenResources {
     /// ```
     ///
     pub fn crtcs(&self, handle: &mut XHandle) -> Result<Vec<Crtc>, XrandrError> {
+        self.crtc_iter(handle)
+            .collect()
+    }
+
+    /// Internal iterator to optimize performance.
+    fn crtc_iter<'a>(&'a self, handle: &'a mut XHandle) -> impl Iterator<Item = Result<Crtc, XrandrError>> + 'a {
         self.crtcs
             .iter()
             .map(|xid| Crtc::from_xid(handle, *xid))
-            .collect()
     }
 
     /// Gets information of only the enabled crtcs
@@ -159,11 +165,7 @@ impl ScreenResources {
     ///    -- Getting info failed for crtc with XID `xid`
     ///
     pub fn enabled_crtcs(&self, handle: &mut XHandle) -> Result<Vec<Crtc>, XrandrError> {
-        Ok(self
-            .crtcs(handle)?
-            .into_iter()
-            .filter(|c| c.mode != 0)
-            .collect())
+        self.crtc_iter(handle).filter_ok(|c| c.mode != 0).collect()
     }
 
     /// Gets information on crtc with given xid
@@ -171,6 +173,7 @@ impl ScreenResources {
     /// # Errors
     /// * `XrandrError::GetCrtcInfo(xid)`
     ///    -- Getting info failed for crtc with XID `xid`
+
     ///
     /// # Examples
     /// ```
@@ -179,10 +182,10 @@ impl ScreenResources {
     /// ```
     ///
     pub fn crtc(&self, handle: &mut XHandle, xid: XId) -> Result<Crtc, XrandrError> {
-        self.crtcs(handle)?
-            .into_iter()
-            .find(|c| c.xid == xid)
-            .ok_or(XrandrError::GetCrtc(xid))
+        if !self.crtcs.contains(&xid) {
+            return Err(XrandrError::GetCrtc(xid));
+        }
+        Crtc::from_xid(handle, xid)
     }
 
     /// Gets information on all crtcs
