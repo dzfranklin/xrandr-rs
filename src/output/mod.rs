@@ -1,18 +1,18 @@
 pub mod property;
 
-use crate::{XHandle, XrandrError, ScreenResources};
+use crate::{ScreenResources, XHandle, XrandrError};
 use indexmap::IndexMap;
 use property::{Property, Value};
-use x11::xrandr::XRROutputInfo;
-use std::os::raw::c_int;
-use std::slice;
-use x11::{xlib, xrandr};
 #[cfg(feature = "serialize")]
 use serde::{Deserialize, Serialize};
+use std::os::raw::c_int;
+use std::slice;
+use x11::xrandr::XRROutputInfo;
+use x11::{xlib, xrandr};
 
-use crate::CURRENT_TIME;
-use crate::XTime;
 use crate::XId;
+use crate::XTime;
+use crate::CURRENT_TIME;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
@@ -57,7 +57,11 @@ impl Output {
         })
     }
 
-    pub(crate) fn new(handle: &mut XHandle, output_info: &XRROutputInfo, xid: u64) -> Result<Self, XrandrError> {
+    pub(crate) fn new(
+        handle: &mut XHandle,
+        output_info: &XRROutputInfo,
+        xid: u64,
+    ) -> Result<Self, XrandrError> {
         let xrandr::XRROutputInfo {
             crtc,
             ncrtc,

@@ -3,8 +3,8 @@ use crate::XTime;
 use crate::XrandrError;
 use std::slice;
 
-use x11::xrandr;
 use std::convert::TryFrom;
+use x11::xrandr;
 
 // A Crtc can display a mode in one of 4 rotations
 #[derive(PartialEq, Eq, Copy, Debug, Clone)]

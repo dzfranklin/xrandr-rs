@@ -1,5 +1,5 @@
-use x11::xrandr;
 use std::slice;
+use x11::xrandr;
 
 use crate::XId;
 

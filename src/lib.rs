@@ -1,10 +1,10 @@
+use itertools::EitherOrBoth as ZipEntry;
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::os::raw::c_ulong;
 use std::ptr;
-use itertools::Itertools;
-use itertools::EitherOrBoth as ZipEntry;
 
 use crtc::normalize_positions;
 pub use indexmap;
@@ -13,13 +13,13 @@ use thiserror::Error;
 use x11::{xlib, xrandr};
 
 pub use crate::crtc::Crtc;
-pub use crate::crtc::{Rotation, Relation};
+pub use crate::crtc::{Relation, Rotation};
 pub use crate::mode::Mode;
-pub use crate::screensize::ScreenSize;
 pub use crate::monitor::Monitor;
 use crate::monitor::MonitorHandle;
+pub use crate::screensize::ScreenSize;
 pub use output::{
-    property::{Property, Value, Values, Range, Ranges, Supported},
+    property::{Property, Range, Ranges, Supported, Value, Values},
     Output,
 };
 
@@ -384,7 +384,9 @@ impl XHandle {
         }
 
         // Move and re-enable the crtcs
-        to_apply.iter_mut().try_for_each(|c| res.set_crtc_config(self, c))
+        to_apply
+            .iter_mut()
+            .try_for_each(|c| res.set_crtc_config(self, c))
     }
 
     /// Sets the screen size in the x backend

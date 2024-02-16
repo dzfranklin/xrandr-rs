@@ -1,12 +1,12 @@
 use std::{ptr, slice};
 use x11::xrandr;
 
-use crate::CURRENT_TIME;
-use crate::XHandle;
+use crate::crtc::Crtc;
 use crate::output::Output;
 use crate::Mode;
-use crate::crtc::Crtc;
+use crate::XHandle;
 use crate::XrandrError;
+use crate::CURRENT_TIME;
 
 use crate::XId;
 use crate::XTime;
@@ -114,7 +114,8 @@ impl ScreenResources {
     /// ```
     ///
     pub fn output(&self, handle: &mut XHandle, xid: XId) -> Result<Output, XrandrError> {
-        let raw_ptr = unsafe { xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
+        let raw_ptr =
+            unsafe { xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
         let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetOutputInfo(xid))?;
 
         let output = Output::new(handle, unsafe { ptr.as_ref() }, xid);
@@ -169,7 +170,8 @@ impl ScreenResources {
     /// ```
     ///
     pub fn crtc(&self, handle: &mut XHandle, xid: XId) -> Result<Crtc, XrandrError> {
-        let raw_ptr = unsafe { xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
+        let raw_ptr =
+            unsafe { xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
         let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetCrtcInfo(xid))?;
 
         let crtc = Crtc::new(unsafe { ptr.as_ref() }, xid);
@@ -188,7 +190,11 @@ impl ScreenResources {
     /// res.set_crtc_config(xhandle, &crtc);
     /// ```
     ///
-    pub fn set_crtc_config(&mut self, handle: &mut XHandle, crtc: &Crtc) -> Result<(), XrandrError> {
+    pub fn set_crtc_config(
+        &mut self,
+        handle: &mut XHandle,
+        crtc: &Crtc,
+    ) -> Result<(), XrandrError> {
         let outputs = match self.outputs.len() {
             0 => std::ptr::null_mut(),
             _ => self.outputs.as_mut_ptr(),
