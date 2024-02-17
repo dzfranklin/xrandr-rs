@@ -45,8 +45,8 @@ impl ScreenResources {
     ///
     pub fn new(handle: &mut XHandle) -> Result<ScreenResources, XrandrError> {
         // TODO: does this need to be freed?
-        // let res = ScreenResourcesHandle::new(handle)?;
         let raw_ptr = unsafe { xrandr::XRRGetScreenResources(handle.sys.as_ptr(), handle.root()) };
+        eprintln!("Post XRRGetScreenResources");
         let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetResources)?;
 
         let xrandr::XRRScreenResources {
@@ -95,6 +95,7 @@ impl ScreenResources {
     /// ```
     ///
     pub fn outputs(&self, handle: &mut XHandle) -> Result<Vec<Output>, XrandrError> {
+        eprintln!("Outputs: {:?}", self.outputs);
         self.outputs
             .iter()
             .map(|xid| self.output(handle, *xid))
@@ -118,7 +119,7 @@ impl ScreenResources {
             unsafe { xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
         let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetOutputInfo(xid))?;
 
-        let output = Output::new(handle, unsafe { ptr.as_ref() }, xid);
+        let output = Output::new(handle, self, unsafe { ptr.as_ref() }, xid);
         unsafe { xrandr::XRRFreeOutputInfo(ptr.as_ptr()) };
 
         output.map_err(|_| XrandrError::GetOutputInfo(xid))
@@ -170,9 +171,11 @@ impl ScreenResources {
     /// ```
     ///
     pub fn crtc(&self, handle: &mut XHandle, xid: XId) -> Result<Crtc, XrandrError> {
+        eprintln!("Pre crtc stuff, xid={xid}");
         let raw_ptr =
             unsafe { xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
         let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetCrtcInfo(xid))?;
+        eprintln!("Post crtc stuff");
 
         let crtc = Crtc::new(unsafe { ptr.as_ref() }, xid);
         unsafe { xrandr::XRRFreeCrtcInfo(ptr.as_ptr()) };

@@ -57,8 +57,11 @@ impl Output {
         })
     }
 
+    // Requires resources because this currently resolves the current_mode
+    // field to a fully owned object. Perhaps this should be done more lazily?
     pub(crate) fn new(
         handle: &mut XHandle,
+        resources: &ScreenResources,
         output_info: &XRROutputInfo,
         xid: u64,
     ) -> Result<Self, XrandrError> {
@@ -90,7 +93,7 @@ impl Output {
 
         let crtcs = unsafe { slice::from_raw_parts(*crtcs, *ncrtc as usize) };
         let crtc_id = if *crtc == 0 { None } else { Some(*crtc) };
-        let curr_crtc = ScreenResources::new(handle)?.crtc(handle, *crtc).ok();
+        let curr_crtc = crtc_id.and_then(|crtc_id| resources.crtc(handle, crtc_id).ok());
         let current_mode =
             curr_crtc.and_then(|crtc_info| modes.iter().copied().find(|&m| m == crtc_info.mode));
 
