@@ -59,7 +59,7 @@ pub struct Crtc {
 
 /// Normalizes a set of Crtcs by making sure the top left pixel of the screen
 /// is at (0,0). This is needed after changing positions/rotations.
-pub(crate) fn normalize_positions(crtcs: &mut Vec<Crtc>) {
+pub(crate) fn normalize_positions(crtcs: &mut [Crtc]) {
     if crtcs.is_empty() {
         return;
     };

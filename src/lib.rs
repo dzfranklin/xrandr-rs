@@ -56,12 +56,6 @@ impl XHandle {
     /// # Errors
     /// * `XrandrError::Open` - Getting the handle failed.
     ///
-    /// # Examples
-    /// ```
-    /// let xhandle = XHandle::open()?;
-    /// let mon1 = xhandle.monitors()?[0];
-    /// ```
-    ///
     pub fn open() -> Result<Self, XrandrError> {
         // XOpenDisplay argument is screen name
         // Null pointer gets first display?
@@ -78,7 +72,8 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let mon1 = xhandle.monitors()?[0];
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let mon1 = xhandle.monitors().unwrap().first().unwrap();
     /// ```
     ///
     pub fn monitors(&mut self) -> Result<Vec<Monitor>, XrandrError> {
@@ -114,7 +109,8 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let dp_1 = xhandle.all_outputs()?[0];
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let output = xhandle.all_outputs().unwrap().first().unwrap();
     /// ```
     ///
     pub fn all_outputs(&mut self) -> Result<Vec<Output>, XrandrError> {
@@ -143,8 +139,14 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let dp_1 = xhandle.all_outputs()?[0];
-    /// xhandle.enable(dp_1)?;
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    ///
+    /// // Find output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// ```
+    /// ```rust,ignore
+    /// xhandle.enable(output).unwrap();
     /// ```
     ///
     pub fn enable(&mut self, output: &Output) -> Result<(), XrandrError> {
@@ -175,8 +177,14 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let dp_1 = xhandle.all_outputs()?[0];
-    /// xhandle.disable(dp_1)?;
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    ///
+    /// // Find output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// ```
+    /// ```rust,ignore
+    /// xhandle.disable(output).unwrap();
     /// ```
     ///
     pub fn disable(&mut self, output: &Output) -> Result<(), XrandrError> {
@@ -199,8 +207,14 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let dp_1 = xhandle.all_outputs()?[0];
-    /// xhandle.set_primary(dp_1)?;
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    ///
+    /// // Find output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// ```
+    /// ```rust,ignore
+    /// xhandle.set_primary(output);
     /// ```
     ///
     pub fn set_primary(&mut self, o: &Output) {
@@ -209,8 +223,8 @@ impl XHandle {
         }
     }
 
-    // - xrandr does not seem to resize after a rotation, and this feels
-    //   similar to me. I would say let the user reposition the displays
+    // - xrandr does not seem to resize after a rotation, and so I will not do so either
+    // TODO: this should probably just take an xid for the mode?
     /// Sets the mode of a given output, relative to another
     ///
     /// # Arguments
@@ -222,9 +236,19 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let dp_1 = xhandle.all_outputs()?[0];
-    /// let mode = dp_1.preferred_modes[0];
-    /// xhandle.set_mode(dp_1, mode)?;
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    ///
+    /// // Find output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    ///
+    /// // Get the preferred mode
+    /// let preferred_mode_id = output.preferred_modes.first().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let preferred_mode = res.mode(*preferred_mode_id).unwrap();
+    /// ```
+    /// ```rust,ignore
+    /// xhandle.set_mode(output, &preferred_mode).unwrap();
     /// ```
     ///
     pub fn set_mode(&mut self, output: &Output, mode: &Mode) -> Result<(), XrandrError> {
@@ -249,15 +273,24 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let dp_1 = outputs[0];
-    /// let hdmi_1 = outputs[3];
-    /// xhandle.set_position(dp_1, Relation::LeftOf, hdmi_1)?;
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    ///
+    /// // find primary output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let primary_output = outputs.iter().find(|o| o.is_primary)
+    ///     .expect("Could not determine primary display");
+    /// ```
+    /// ```rust,ignore
+    /// // Find a second output and position relative to it
+    /// let other_output = outputs.iter().find(|o| o.current_mode.is_some() && o.xid != primary_output.xid)
+    ///     .expect("Cannot test `set_position` with fewer than 2 enabled displays");
+    /// xhandle.set_position(primary_output, xrandr::Relation::LeftOf, other_output).unwrap();
     /// ```
     ///
     pub fn set_position(
         &mut self,
         output: &Output,
-        relation: &Relation,
+        relation: Relation,
         relative_output: &Output,
     ) -> Result<(), XrandrError> {
         let crtc_id = output
@@ -299,14 +332,21 @@ impl XHandle {
     ///
     /// # Examples
     /// ```
-    /// let dp_1 = outputs[0];
-    /// xhandle.set_rotation(dp_1, Rotation::Inverted)?;
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// 
+    /// // Find enabled output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// ```
+    /// ```rust,ignore
+    /// // Turn upside-down
+    /// xhandle.set_rotation(output, xrandr::Rotation::Inverted).unwrap();
     /// ```
     ///
     pub fn set_rotation(
         &mut self,
         output: &Output,
-        rotation: &Rotation,
+        rotation: Rotation,
     ) -> Result<(), XrandrError> {
         let crtc_id = output
             .crtc
@@ -315,8 +355,8 @@ impl XHandle {
         let res = ScreenResources::new(self)?;
         let mut crtc = res.crtc(self, crtc_id)?;
 
-        (crtc.width, crtc.height) = crtc.rotated_size(*rotation);
-        crtc.rotation = *rotation;
+        (crtc.width, crtc.height) = crtc.rotated_size(rotation);
+        crtc.rotation = rotation;
 
         self.apply_new_crtcs(&mut [crtc])
     }
@@ -364,7 +404,7 @@ impl XHandle {
         }
         self.set_screensize(&new_size);
 
-        // Find the crtcs that were changed. Done this late to also account
+        // Find the crtcs that were changed. Done at this point to also account
         // for crtcs that were altered by normalize_positions()
         let mut to_apply: Vec<&mut Crtc> = Vec::new();
         for pair in old_crtcs.iter().zip_longest(new_crtcs.iter_mut()) {
@@ -487,19 +527,119 @@ pub enum XrandrError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::thread::sleep;
 
-    fn handle() -> XHandle {
-        XHandle::open().unwrap()
-    }
+    use super::*;
 
     #[test]
     fn can_open() {
-        handle();
+        XHandle::open().unwrap();
     }
 
     #[test]
-    fn can_debug_format_monitors() {
-        format!("{:#?}", handle().monitors().unwrap());
+    fn can_get_monitor() {
+        let mut handle = XHandle::open().unwrap();
+        let monitors = handle.monitors().unwrap();
+        let monitor = monitors.first().unwrap();
+        eprintln!("Successfully found monitor:\n{:?}", monitor);
+    }
+    
+    #[test]
+    fn can_get_output() {
+        let mut handle = XHandle::open().unwrap();
+        let outputs = handle.all_outputs().unwrap();
+        let output = outputs.first().unwrap();
+        eprintln!("Successfully found output:\n{:?}", output);
+    }
+    
+    #[test]
+    #[ignore] // ignore setter methods by default
+    fn can_disable_enable_output() {
+        if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
+
+        let mut handle = XHandle::open().unwrap();
+        let outputs = handle.all_outputs().unwrap();
+        let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+
+        handle.disable(output).unwrap();
+        sleep(core::time::Duration::from_secs(2));
+        handle.enable(output).unwrap();
+    }
+
+    #[test]
+    #[ignore] // ignore setter methods by default
+    fn can_rotate() {
+        if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
+
+        let mut handle = XHandle::open().unwrap();
+        let outputs = handle.all_outputs().unwrap();
+        let output = outputs.first().unwrap();
+
+        handle.set_rotation(output, Rotation::Left).unwrap();
+        sleep(core::time::Duration::from_secs(1));
+        handle.set_rotation(output, Rotation::Inverted).unwrap();
+        sleep(core::time::Duration::from_secs(1));
+        handle.set_rotation(output, Rotation::Right).unwrap();
+        sleep(core::time::Duration::from_secs(1));
+        handle.set_rotation(output, Rotation::Normal).unwrap();
+    }
+
+    #[test]
+    #[ignore] // ignore setter methods by default
+    fn can_set_primary() {
+        if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
+
+        let mut handle = XHandle::open().unwrap();
+        let outputs = handle.all_outputs().unwrap();
+        assert!(outputs.len() > 1, "Cannot test `set_primary` with fewer than 2 displays");
+
+        let primary_output = outputs.iter().find(|o| o.is_primary)
+            .expect("Could not determine primary display");
+        let other_output = outputs.iter().find(|o| o.xid != primary_output.xid)
+            .expect("Cannot test `set_primary` with fewer than 2 displays");
+
+        handle.set_primary(other_output);
+        sleep(core::time::Duration::from_secs(2));
+        handle.set_primary(primary_output);
+    }
+    
+    #[test]
+    #[ignore] // ignore setter methods by default
+    fn can_set_mode() {
+        if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
+
+        let mut handle = XHandle::open().unwrap();
+        let outputs = handle.all_outputs().unwrap();
+        let output = outputs.first().unwrap();
+
+        let res = ScreenResources::new(&mut handle).unwrap();
+        let current_mode_id = output.current_mode
+            .expect("Could not determine current mode");
+        let other_mode_id = *output.modes.iter().find(|m| **m != current_mode_id)
+            .expect("Cannot test `set_mode` with fewer than 2 modes");
+
+        let current_mode = res.mode(current_mode_id).unwrap();
+        let other_mode = res.mode(other_mode_id).unwrap();
+
+        handle.set_mode(output, &other_mode).unwrap();
+        sleep(core::time::Duration::from_secs(2));
+        handle.set_mode(output, &current_mode).unwrap();
+    }
+
+    #[test]
+    #[ignore] // ignore setter methods by default
+    fn can_set_position() {
+        if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
+
+        let mut handle = XHandle::open().unwrap();
+        let outputs = handle.all_outputs().unwrap();
+        assert!(outputs.len() > 1, "Cannot test `set_position` with fewer than 2 displays");
+
+        let primary_output = outputs.iter().find(|o| o.is_primary)
+            .expect("Could not determine primary display");
+        let other_output = outputs.iter().find(|o| o.current_mode.is_some() && o.xid != primary_output.xid)
+            .expect("Cannot test `set_position` with fewer than 2 enabled displays");
+
+        handle.set_position(primary_output, Relation::LeftOf, other_output).unwrap();
     }
 }

@@ -38,15 +38,13 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let xhandle = XHandle.open()?;
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let crtc_87 = res.crtc(&mut xhandle, 87);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
     /// ```
     ///
     pub fn new(handle: &mut XHandle) -> Result<ScreenResources, XrandrError> {
         // TODO: does this need to be freed?
         let raw_ptr = unsafe { xrandr::XRRGetScreenResources(handle.sys.as_ptr(), handle.root()) };
-        eprintln!("Post XRRGetScreenResources");
         let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetResources)?;
 
         let xrandr::XRRScreenResources {
@@ -90,12 +88,13 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let outputs = res.outputs(&mut xhandle);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// // All the outputs that are on this Crtc
+    /// res.outputs(&mut xhandle);
     /// ```
     ///
     pub fn outputs(&self, handle: &mut XHandle) -> Result<Vec<Output>, XrandrError> {
-        eprintln!("Outputs: {:?}", self.outputs);
         self.outputs
             .iter()
             .map(|xid| self.output(handle, *xid))
@@ -110,8 +109,10 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let output_89 = res.output(&mut xhandle, 89);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let output_id = res.outputs.get(0).unwrap();
+    /// let output = res.output(&mut xhandle, *output_id).unwrap();
     /// ```
     ///
     pub fn output(&self, handle: &mut XHandle, xid: XId) -> Result<Output, XrandrError> {
@@ -133,8 +134,9 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let crtcs = res.crtcs(&mut xhandle);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtcs = res.crtcs(&mut xhandle).unwrap();
     /// ```
     ///
     pub fn crtcs(&self, handle: &mut XHandle) -> Result<Vec<Crtc>, XrandrError> {
@@ -166,16 +168,20 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let current_crtc = res.crtc(&mut xhandle, output.crtc);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// // Get an enabled output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// // Find information about its Crtc
+    /// let output_crtc_id = output.crtc.unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtc = res.crtc(&mut xhandle, output.crtc.unwrap());
     /// ```
     ///
     pub fn crtc(&self, handle: &mut XHandle, xid: XId) -> Result<Crtc, XrandrError> {
-        eprintln!("Pre crtc stuff, xid={xid}");
         let raw_ptr =
             unsafe { xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
         let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetCrtcInfo(xid))?;
-        eprintln!("Post crtc stuff");
 
         let crtc = Crtc::new(unsafe { ptr.as_ref() }, xid);
         unsafe { xrandr::XRRFreeCrtcInfo(ptr.as_ptr()) };
@@ -186,11 +192,21 @@ impl ScreenResources {
     /// Apply the fields set in `crtc`.
     /// # Examples
     /// ```
-    /// // Changing the mode of the Crtc of some Output:
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let mut crtc = res.crtc(&mut xhandle, output.crtc)?;
-    /// crtc.mode = some_mode.xid;
-    /// res.set_crtc_config(xhandle, &crtc);
+    /// // Changing the rotation of the Crtc of some Output:
+    /// // This is an example and should really be done using set_rotation()
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// // Find enabled output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// // Get its current Crtc information
+    /// let mut res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtc_id = output.crtc.unwrap();
+    /// let mut crtc = res.crtc(&mut xhandle, crtc_id).unwrap();
+    /// ```
+    /// ```rust,ignore
+    /// // Alter the mode field and apply
+    /// crtc.mode = 0;
+    /// res.set_crtc_config(&mut xhandle, &crtc);
     /// ```
     ///
     pub fn set_crtc_config(
@@ -221,16 +237,13 @@ impl ScreenResources {
         Ok(())
     }
 
-    /// Gets information on all crtcs
-    ///
-    /// # Errors
-    /// * `XrandrError::GetCrtcInfo(xid)`
-    ///    -- Getting info failed for crtc with XID `xid`
+    /// Gets information on all modes
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let crtcs = res.crtcs(&mut xhandle);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtcs = res.modes();
     /// ```
     ///
     #[must_use]
@@ -246,8 +259,14 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let current_mode = res.mode(&mut xhandle, output.mode);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// // Get an enabled output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// // Find its current mode
+    /// let current_mode_id = output.current_mode.unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let current_mode = res.mode(current_mode_id);
     /// ```
     ///
     pub fn mode(&self, xid: XId) -> Result<Mode, XrandrError> {

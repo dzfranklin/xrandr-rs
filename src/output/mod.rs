@@ -165,8 +165,10 @@ mod tests {
 
     #[test]
     fn can_get_output_edid() {
-        let outputs = XHandle::open().unwrap().all_outputs().unwrap();
-        let output = outputs.first().unwrap();
+        let mut handle = XHandle::open().unwrap();
+        let outputs = handle.all_outputs().unwrap();
+        let output = outputs.iter().find(|o| o.connected).unwrap();
+
         let edid = output.edid().unwrap();
         println!("{:?}", edid);
     }
