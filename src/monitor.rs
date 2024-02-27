@@ -1,12 +1,12 @@
 use core::ptr;
-use std::slice;
-use x11::xrandr;
 #[cfg(feature = "serialize")]
 use serde::{Deserialize, Serialize};
+use std::slice;
+use x11::xrandr;
 
+use crate::output::Output;
 use crate::XHandle;
 use crate::XrandrError;
-use crate::output::Output;
 
 // A wrapper that drops the pointer if it goes out of scope.
 // Avoid having to deal with the various early returns

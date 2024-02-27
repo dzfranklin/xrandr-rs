@@ -1,35 +1,17 @@
 use std::{ptr, slice};
 use x11::xrandr;
 
-use crate::XHandle;
+use crate::crtc::Crtc;
 use crate::output::Output;
 use crate::Mode;
-use crate::crtc::Crtc;
+use crate::XHandle;
 use crate::XrandrError;
+use crate::CURRENT_TIME;
 
 use crate::XId;
 use crate::XTime;
 
-// A wrapper that drops the pointer if it goes out of scope.
-// Avoid having to deal with the various early returns
-pub(crate) struct ScreenResourcesHandle {
-    ptr: ptr::NonNull<xrandr::XRRScreenResources>,
-}
-
-impl ScreenResourcesHandle {
-    pub(crate) fn new(handle: &mut XHandle) -> Result<Self, XrandrError> {
-        let raw_ptr = unsafe { xrandr::XRRGetScreenResources(handle.sys.as_ptr(), handle.root()) };
-
-        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetResources)?;
-        Ok(Self { ptr })
-    }
-
-    pub(crate) fn ptr(&self) -> *mut x11::xrandr::XRRScreenResources {
-        self.ptr.as_ptr()
-    }
-}
-
-impl Drop for ScreenResourcesHandle {
+impl Drop for ScreenResources {
     fn drop(&mut self) {
         unsafe { xrandr::XRRFreeScreenResources(self.ptr.as_ptr()) };
     }
@@ -37,6 +19,7 @@ impl Drop for ScreenResourcesHandle {
 
 #[derive(Debug)]
 pub struct ScreenResources {
+    ptr: ptr::NonNull<xrandr::XRRScreenResources>,
     pub timestamp: XTime,
     pub config_timestamp: XTime,
     pub ncrtc: i32,
@@ -55,14 +38,15 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let xhandle = XHandle.open()?;
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let crtc_87 = res.crtc(&mut xhandle, 87);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
     /// ```
     ///
     pub fn new(handle: &mut XHandle) -> Result<ScreenResources, XrandrError> {
         // TODO: does this need to be freed?
-        let res = ScreenResourcesHandle::new(handle)?;
+        let raw_ptr = unsafe { xrandr::XRRGetScreenResources(handle.sys.as_ptr(), handle.root()) };
+        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetResources)?;
+
         let xrandr::XRRScreenResources {
             modes,
             nmode,
@@ -73,7 +57,7 @@ impl ScreenResources {
             timestamp,
             configTimestamp,
             ..
-        } = unsafe { res.ptr.as_ref() };
+        } = unsafe { ptr.as_ref() };
 
         let x_modes: &[xrandr::XRRModeInfo] =
             unsafe { slice::from_raw_parts(*modes, *nmode as usize) };
@@ -85,6 +69,7 @@ impl ScreenResources {
         let x_outputs = unsafe { slice::from_raw_parts(*outputs, *noutput as usize) };
 
         Ok(ScreenResources {
+            ptr,
             timestamp: *timestamp,
             config_timestamp: *configTimestamp,
             ncrtc: *ncrtc,
@@ -103,14 +88,16 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let outputs = res.outputs(&mut xhandle);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// // All the outputs that are on this Crtc
+    /// res.outputs(&mut xhandle);
     /// ```
     ///
     pub fn outputs(&self, handle: &mut XHandle) -> Result<Vec<Output>, XrandrError> {
         self.outputs
             .iter()
-            .map(|xid| Output::from_xid(handle, *xid))
+            .map(|xid| self.output(handle, *xid))
             .collect()
     }
 
@@ -122,15 +109,21 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let output_89 = res.output(&mut xhandle, 89);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let output_id = res.outputs.get(0).unwrap();
+    /// let output = res.output(&mut xhandle, *output_id).unwrap();
     /// ```
     ///
     pub fn output(&self, handle: &mut XHandle, xid: XId) -> Result<Output, XrandrError> {
-        self.outputs(handle)?
-            .into_iter()
-            .find(|o| o.xid == xid)
-            .ok_or(XrandrError::GetOutputInfo(xid))
+        let raw_ptr =
+            unsafe { xrandr::XRRGetOutputInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
+        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetOutputInfo(xid))?;
+
+        let output = Output::new(handle, self, unsafe { ptr.as_ref() }, xid);
+        unsafe { xrandr::XRRFreeOutputInfo(ptr.as_ptr()) };
+
+        output.map_err(|_| XrandrError::GetOutputInfo(xid))
     }
 
     /// Gets information on all crtcs
@@ -141,14 +134,15 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let crtcs = res.crtcs(&mut xhandle);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtcs = res.crtcs(&mut xhandle).unwrap();
     /// ```
     ///
     pub fn crtcs(&self, handle: &mut XHandle) -> Result<Vec<Crtc>, XrandrError> {
         self.crtcs
             .iter()
-            .map(|xid| Crtc::from_xid(handle, *xid))
+            .map(|xid| self.crtc(handle, *xid))
             .collect()
     }
 
@@ -174,27 +168,82 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let current_crtc = res.crtc(&mut xhandle, output.crtc);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// // Get an enabled output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// // Find information about its Crtc
+    /// let output_crtc_id = output.crtc.unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtc = res.crtc(&mut xhandle, output.crtc.unwrap());
     /// ```
     ///
     pub fn crtc(&self, handle: &mut XHandle, xid: XId) -> Result<Crtc, XrandrError> {
-        self.crtcs(handle)?
-            .into_iter()
-            .find(|c| c.xid == xid)
-            .ok_or(XrandrError::GetCrtc(xid))
+        let raw_ptr =
+            unsafe { xrandr::XRRGetCrtcInfo(handle.sys.as_ptr(), self.ptr.as_ptr(), xid) };
+        let ptr = ptr::NonNull::new(raw_ptr).ok_or(XrandrError::GetCrtcInfo(xid))?;
+
+        let crtc = Crtc::new(unsafe { ptr.as_ref() }, xid);
+        unsafe { xrandr::XRRFreeCrtcInfo(ptr.as_ptr()) };
+
+        crtc.map_err(|_| XrandrError::GetCrtcInfo(xid))
     }
 
-    /// Gets information on all crtcs
+    /// Apply the fields set in `crtc`.
+    /// # Examples
+    /// ```
+    /// // Changing the rotation of the Crtc of some Output:
+    /// // This is an example and should really be done using set_rotation()
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// // Find enabled output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// // Get its current Crtc information
+    /// let mut res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtc_id = output.crtc.unwrap();
+    /// let mut crtc = res.crtc(&mut xhandle, crtc_id).unwrap();
+    /// ```
+    /// ```rust,ignore
+    /// // Alter the mode field and apply
+    /// crtc.mode = 0;
+    /// res.set_crtc_config(&mut xhandle, &crtc);
+    /// ```
     ///
-    /// # Errors
-    /// * `XrandrError::GetCrtcInfo(xid)`
-    ///    -- Getting info failed for crtc with XID `xid`
+    pub fn set_crtc_config(
+        &mut self,
+        handle: &mut XHandle,
+        crtc: &Crtc,
+    ) -> Result<(), XrandrError> {
+        let outputs = match self.outputs.len() {
+            0 => std::ptr::null_mut(),
+            _ => self.outputs.as_mut_ptr(),
+        };
+
+        unsafe {
+            xrandr::XRRSetCrtcConfig(
+                handle.sys.as_ptr(),
+                self.ptr.as_ptr(),
+                crtc.xid,
+                CURRENT_TIME,
+                crtc.x,
+                crtc.y,
+                crtc.mode,
+                crtc.rotation as u16,
+                outputs,
+                i32::try_from(self.outputs.len()).unwrap(),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Gets information on all modes
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let crtcs = res.crtcs(&mut xhandle);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let crtcs = res.modes();
     /// ```
     ///
     #[must_use]
@@ -210,8 +259,14 @@ impl ScreenResources {
     ///
     /// # Examples
     /// ```
-    /// let res = ScreenResources::new(&mut xhandle)?;
-    /// let current_mode = res.mode(&mut xhandle, output.mode);
+    /// let mut xhandle = xrandr::XHandle::open().unwrap();
+    /// // Get an enabled output
+    /// let outputs = xhandle.all_outputs().unwrap();
+    /// let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+    /// // Find its current mode
+    /// let current_mode_id = output.current_mode.unwrap();
+    /// let res = xrandr::ScreenResources::new(&mut xhandle).unwrap();
+    /// let current_mode = res.mode(current_mode_id);
     /// ```
     ///
     pub fn mode(&self, xid: XId) -> Result<Mode, XrandrError> {
