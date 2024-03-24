@@ -573,7 +573,7 @@ mod tests {
 
         let mut handle = XHandle::open().unwrap();
         let outputs = handle.all_outputs().unwrap();
-        let output = outputs.first().unwrap();
+        let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
 
         handle.set_rotation(output, Rotation::Left).unwrap();
         sleep(core::time::Duration::from_secs(1));
@@ -610,7 +610,7 @@ mod tests {
 
         let mut handle = XHandle::open().unwrap();
         let outputs = handle.all_outputs().unwrap();
-        let output = outputs.first().unwrap();
+        let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
 
         let res = ScreenResources::new(&mut handle).unwrap();
         let current_mode_id = output.current_mode

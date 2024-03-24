@@ -212,13 +212,13 @@ impl ScreenResources {
     pub fn set_crtc_config(
         &mut self,
         handle: &mut XHandle,
-        crtc: &Crtc,
+        crtc: &mut Crtc,
     ) -> Result<(), XrandrError> {
-        let outputs = match self.outputs.len() {
+        let outputs = match crtc.outputs.len() {
             0 => std::ptr::null_mut(),
-            _ => self.outputs.as_mut_ptr(),
+            _ => crtc.outputs.as_mut_ptr(),
         };
-
+        
         unsafe {
             xrandr::XRRSetCrtcConfig(
                 handle.sys.as_ptr(),
@@ -230,7 +230,7 @@ impl ScreenResources {
                 crtc.mode,
                 crtc.rotation as u16,
                 outputs,
-                i32::try_from(self.outputs.len()).unwrap(),
+                i32::try_from(crtc.outputs.len()).unwrap(),
             );
         }
 
