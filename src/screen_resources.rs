@@ -1,15 +1,19 @@
 use std::{ptr, slice};
+use itertools::EitherOrBoth as ZipEntry;
+use itertools::Itertools;
+use std::collections::HashMap;
 use x11::xrandr;
 
-use crate::crtc::Crtc;
+use crate::ScreenSize;
+use crate::crtc::{Crtc,normalize_positions};
 use crate::output::Output;
 use crate::Mode;
 use crate::XHandle;
 use crate::XrandrError;
 use crate::CURRENT_TIME;
-
 use crate::XId;
 use crate::XTime;
+
 
 impl Drop for ScreenResources {
     fn drop(&mut self) {
@@ -210,7 +214,7 @@ impl ScreenResources {
     /// ```
     ///
     pub fn set_crtc_config(
-        &mut self,
+        &self,
         handle: &mut XHandle,
         crtc: &mut Crtc,
     ) -> Result<(), XrandrError> {
@@ -275,5 +279,81 @@ impl ScreenResources {
             .find(|c| c.xid == xid)
             .cloned()
             .ok_or(XrandrError::GetModeInfo(xid))
+    }
+
+    /// Applies some set of altered crtcs
+    /// Due to xrandr's structure, changing one or more crtcs properly can be
+    /// quite complicated. One should therefore call this function on any crtcs
+    /// that you want to change.
+    /// # Arguments
+    /// * `changes`
+    ///     Altered crtcs. Must be mutable because of crct.apply() calls.
+    ///
+    pub(crate) fn apply_new_crtcs(&self, handle: &mut XHandle, changed: &mut [Crtc]) -> Result<(), XrandrError> {
+        let res = ScreenResources::new(handle)?;
+        let old_crtcs = res.enabled_crtcs(handle)?;
+
+        // Construct new crtcs out of the old ones and the new where provided
+        let mut changed_map: HashMap<XId, Crtc> = HashMap::new();
+        changed.iter().cloned().for_each(|c| {
+            changed_map.insert(c.xid, c);
+        });
+
+        let mut new_crtcs: Vec<Crtc> = Vec::new();
+        for crtc in &old_crtcs {
+            match changed_map.remove(&crtc.xid) {
+                None => new_crtcs.push(crtc.clone()),
+                Some(c) => new_crtcs.push(c.clone()),
+            }
+        }
+        new_crtcs.extend(changed_map.drain().map(|(_, v)| v));
+
+        // To calculate the right screensize, we should make sure the 
+        // mode-related fields are updated if the mode_id has changed
+        for crtc in &mut new_crtcs {
+            let mode = self.mode(crtc.mode)?;
+            crtc.width = mode.width;
+            crtc.height = mode.height;
+        }
+
+        // In case the top-left corner is no longer at (0,0), renormalize
+        normalize_positions(&mut new_crtcs);
+        let new_size = ScreenSize::fitting_crtcs(handle, &new_crtcs);
+
+        // Disable crtcs that do not fit before setting the new size
+        // Note that this should only be crtcs that were changed, but `changed`
+        // contains the already altered crtc, so we have to use `old_crtcs`
+        let mut old_crtcs = old_crtcs;
+        for crtc in &mut old_crtcs {
+            if !new_size.fits_crtc(crtc) {
+                crtc.set_disable();
+                res.set_crtc_config(handle, crtc)?;
+            }
+        }
+        handle.set_screensize(&new_size);
+
+        // Find the crtcs that were changed. Done at this point to also account
+        // for crtcs that were altered by normalize_positions()
+        let mut to_apply: Vec<&mut Crtc> = Vec::new();
+        for pair in old_crtcs.iter().zip_longest(new_crtcs.iter_mut()) {
+            match pair {
+                ZipEntry::Both(old, new) => {
+                    assert!(old.xid == new.xid, "invalid new_crtcs");
+                    if new.timestamp < old.timestamp {
+                        return Err(XrandrError::CrtcChanged(new.xid));
+                    }
+                    if new != old {
+                        to_apply.push(new);
+                    }
+                }
+                ZipEntry::Right(new) => to_apply.push(new),
+                ZipEntry::Left(_) => unreachable!("invalid new_crtcs"),
+            }
+        }
+
+        // Move and re-enable the crtcs
+        to_apply
+            .iter_mut()
+            .try_for_each(|c| self.set_crtc_config(handle, c))
     }
 }

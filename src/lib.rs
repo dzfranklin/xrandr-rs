@@ -1,13 +1,8 @@
-use itertools::EitherOrBoth as ZipEntry;
-use itertools::Itertools;
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::os::raw::c_ulong;
 use std::ptr;
 
-use crtc::normalize_positions;
-pub use indexmap;
 pub use screen_resources::ScreenResources;
 use thiserror::Error;
 use x11::{xlib, xrandr};
@@ -150,24 +145,21 @@ impl XHandle {
     /// ```
     ///
     pub fn enable(&mut self, output: &Output) -> Result<(), XrandrError> {
-        if output.current_mode.is_some() {
-            return Ok(());
-        }
-
         let target_mode = output
             .preferred_modes
             .first()
             .ok_or(XrandrError::NoPreferredModes(output.xid))?;
 
         let mut crtc = self.find_available_crtc(output)?;
-        let mode = ScreenResources::new(self)?.mode(*target_mode)?;
+        let res = ScreenResources::new(self)?;
+        let mode = res.mode(*target_mode)?;
 
         crtc.mode = mode.xid;
         crtc.width = mode.width;
         crtc.height = mode.height;
         crtc.outputs = vec![output.xid];
 
-        self.apply_new_crtcs(&mut [crtc])
+        res.apply_new_crtcs(self, &mut [crtc])
     }
 
     /// Disable the given output
@@ -197,7 +189,7 @@ impl XHandle {
         let mut crtc = res.crtc(self, crtc_id)?;
         crtc.set_disable();
 
-        self.apply_new_crtcs(&mut [crtc])
+        res.apply_new_crtcs(self, &mut [crtc])
     }
 
     /// Sets the given output as the primary output
@@ -255,10 +247,11 @@ impl XHandle {
         let crtc_id = output
             .crtc
             .ok_or(XrandrError::OutputDisabled(output.name.clone()))?;
-        let mut crtc = ScreenResources::new(self)?.crtc(self, crtc_id)?;
+        let res = ScreenResources::new(self)?;
+        let mut crtc = res.crtc(self, crtc_id)?;
 
         crtc.mode = mode.xid;
-        self.apply_new_crtcs(&mut [crtc])
+        res.apply_new_crtcs(self, &mut [crtc])
     }
 
     /// Sets the position of a given output, relative to another
@@ -318,7 +311,7 @@ impl XHandle {
             Relation::SameAs => (rel_x, rel_y),
         };
 
-        self.apply_new_crtcs(&mut [crtc])
+        res.apply_new_crtcs(self, &mut [crtc])
     }
 
     /// Sets the position of a given output, relative to another
@@ -358,76 +351,9 @@ impl XHandle {
         (crtc.width, crtc.height) = crtc.rotated_size(rotation);
         crtc.rotation = rotation;
 
-        self.apply_new_crtcs(&mut [crtc])
+        res.apply_new_crtcs(self, &mut [crtc])
     }
 
-    /// Applies some set of altered crtcs
-    /// Due to xrandr's structure, changing one or more crtcs properly can be
-    /// quite complicated. One should therefore call this function on any crtcs
-    /// that you want to change.
-    /// # Arguments
-    /// * `changes`
-    ///     Altered crtcs. Must be mutable because of crct.apply() calls.
-    ///
-    fn apply_new_crtcs(&mut self, changed: &mut [Crtc]) -> Result<(), XrandrError> {
-        let mut res = ScreenResources::new(self)?;
-        let old_crtcs = res.enabled_crtcs(self)?;
-
-        // Construct new crtcs out of the old ones and the new where provided
-        let mut changed_map: HashMap<XId, Crtc> = HashMap::new();
-        changed.iter().cloned().for_each(|c| {
-            changed_map.insert(c.xid, c);
-        });
-
-        let mut new_crtcs: Vec<Crtc> = Vec::new();
-        for crtc in &old_crtcs {
-            match changed_map.remove(&crtc.xid) {
-                None => new_crtcs.push(crtc.clone()),
-                Some(c) => new_crtcs.push(c.clone()),
-            }
-        }
-        new_crtcs.extend(changed_map.drain().map(|(_, v)| v));
-
-        // In case the top-left corner is no longer at (0,0), renormalize
-        normalize_positions(&mut new_crtcs);
-        let new_size = ScreenSize::fitting_crtcs(self, &new_crtcs);
-
-        // Disable crtcs that do not fit before setting the new size
-        // Note that this should only be crtcs that were changed, but `changed`
-        // contains the already altered crtc, so we have to use `old_crtcs`
-        let mut old_crtcs = old_crtcs;
-        for crtc in &mut old_crtcs {
-            if !new_size.fits_crtc(crtc) {
-                crtc.set_disable();
-                res.set_crtc_config(self, crtc)?;
-            }
-        }
-        self.set_screensize(&new_size);
-
-        // Find the crtcs that were changed. Done at this point to also account
-        // for crtcs that were altered by normalize_positions()
-        let mut to_apply: Vec<&mut Crtc> = Vec::new();
-        for pair in old_crtcs.iter().zip_longest(new_crtcs.iter_mut()) {
-            match pair {
-                ZipEntry::Both(old, new) => {
-                    assert!(old.xid == new.xid, "invalid new_crtcs");
-                    if new.timestamp < old.timestamp {
-                        return Err(XrandrError::CrtcChanged(new.xid));
-                    }
-                    if new != old {
-                        to_apply.push(new);
-                    }
-                }
-                ZipEntry::Right(new) => to_apply.push(new),
-                ZipEntry::Left(_) => unreachable!("invalid new_crtcs"),
-            }
-        }
-
-        // Move and re-enable the crtcs
-        to_apply
-            .iter_mut()
-            .try_for_each(|c| res.set_crtc_config(self, c))
-    }
 
     /// Sets the screen size in the x backend
     fn set_screensize(&mut self, size: &ScreenSize) {
@@ -541,7 +467,7 @@ mod tests {
         let mut handle = XHandle::open().unwrap();
         let monitors = handle.monitors().unwrap();
         let monitor = monitors.first().unwrap();
-        eprintln!("Successfully found monitor:\n{:?}", monitor);
+        println!("Successfully found monitor:\n{:?}", monitor);
     }
     
     #[test]
@@ -549,11 +475,10 @@ mod tests {
         let mut handle = XHandle::open().unwrap();
         let outputs = handle.all_outputs().unwrap();
         let output = outputs.first().unwrap();
-        eprintln!("Successfully found output:\n{:?}", output);
+        println!("Successfully found output:\n{:?}", output);
     }
     
     #[test]
-    #[ignore] // ignore setter methods by default
     fn can_disable_enable_output() {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
@@ -567,7 +492,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // ignore setter methods by default
     fn can_rotate() {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
@@ -585,13 +509,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // ignore setter methods by default
     fn can_set_primary() {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
         let mut handle = XHandle::open().unwrap();
         let outputs = handle.all_outputs().unwrap();
-        assert!(outputs.len() > 1, "Cannot test `set_primary` with fewer than 2 displays");
+        let enabled_outputs: Vec<&Output> = outputs
+            .iter()
+            .filter(|o| o.current_mode.is_some())
+            .collect();
+        assert!(enabled_outputs.len() > 1, "Cannot test `set_primary` with fewer than 2 displays");
 
         let primary_output = outputs.iter().find(|o| o.is_primary)
             .expect("Could not determine primary display");
@@ -604,7 +531,6 @@ mod tests {
     }
     
     #[test]
-    #[ignore] // ignore setter methods by default
     fn can_set_mode() {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
@@ -627,7 +553,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // ignore setter methods by default
     fn can_set_position() {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
