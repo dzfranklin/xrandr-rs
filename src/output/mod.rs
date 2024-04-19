@@ -34,12 +34,6 @@ pub struct Output {
     pub current_mode: Option<XId>,
 }
 
-// TODO: replace this
-// impl Drop for OutputHandle {
-//     fn drop(&mut self) {
-//         unsafe { xrandr::XRRFreeOutputInfo(self.ptr.as_ptr()) };
-//     }
-// }
 
 impl Output {
     /// Get the Output's EDID property, if it exists.

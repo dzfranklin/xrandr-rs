@@ -483,8 +483,13 @@ mod tests {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
         let mut handle = XHandle::open().unwrap();
-        let outputs = handle.all_outputs().unwrap();
-        let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+        let outputs: Vec<Output> = handle
+            .all_outputs()
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.current_mode.is_some())
+            .collect();
+        let output = outputs.first().unwrap();
 
         handle.disable(output).unwrap();
         sleep(core::time::Duration::from_secs(2));
@@ -496,8 +501,13 @@ mod tests {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
         let mut handle = XHandle::open().unwrap();
-        let outputs = handle.all_outputs().unwrap();
-        let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+        let outputs: Vec<Output> = handle
+            .all_outputs()
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.current_mode.is_some())
+            .collect();
+        let output = outputs.first().unwrap();
 
         handle.set_rotation(output, Rotation::Left).unwrap();
         sleep(core::time::Duration::from_secs(1));
@@ -513,12 +523,14 @@ mod tests {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
         let mut handle = XHandle::open().unwrap();
-        let outputs = handle.all_outputs().unwrap();
-        let enabled_outputs: Vec<&Output> = outputs
-            .iter()
+        let outputs: Vec<Output> = handle
+            .all_outputs()
+            .unwrap()
+            .into_iter()
             .filter(|o| o.current_mode.is_some())
             .collect();
-        assert!(enabled_outputs.len() > 1, "Cannot test `set_primary` with fewer than 2 displays");
+        
+        assert!(outputs.len() > 1, "Cannot test `set_primary` with fewer than 2 outputs");
 
         let primary_output = outputs.iter().find(|o| o.is_primary)
             .expect("Could not determine primary display");
@@ -535,8 +547,13 @@ mod tests {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
         let mut handle = XHandle::open().unwrap();
-        let outputs = handle.all_outputs().unwrap();
-        let output = outputs.iter().find(|o| o.current_mode.is_some()).unwrap();
+        let outputs: Vec<Output> = handle
+            .all_outputs()
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.current_mode.is_some())
+            .collect();
+        let output = outputs.first().unwrap();
 
         let res = ScreenResources::new(&mut handle).unwrap();
         let current_mode_id = output.current_mode
@@ -557,13 +574,20 @@ mod tests {
         if std::env::var("XRANDR_TEST_NO_SET_METHODS").is_ok() { return }
 
         let mut handle = XHandle::open().unwrap();
-        let outputs = handle.all_outputs().unwrap();
+        let outputs: Vec<Output> = handle
+            .all_outputs()
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.current_mode.is_some())
+            .collect();
         assert!(outputs.len() > 1, "Cannot test `set_position` with fewer than 2 displays");
 
-        let primary_output = outputs.iter().find(|o| o.is_primary)
+        let primary_output = outputs.iter().find(|o| o.current_mode.is_some() && o.is_primary)
             .expect("Could not determine primary display");
         let other_output = outputs.iter().find(|o| o.current_mode.is_some() && o.xid != primary_output.xid)
             .expect("Cannot test `set_position` with fewer than 2 enabled displays");
+
+        eprintln!("{:?}, {:?}", primary_output, other_output);
 
         handle.set_position(primary_output, Relation::LeftOf, other_output).unwrap();
     }

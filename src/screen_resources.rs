@@ -308,9 +308,14 @@ impl ScreenResources {
         }
         new_crtcs.extend(changed_map.drain().map(|(_, v)| v));
 
+        // Omit the disabled crtcs in the screensize calculation
+        let mut new_enabled_crtcs: Vec<&mut Crtc> = new_crtcs.iter_mut()
+            .filter(|c| c.mode != 0)
+            .collect();
+
         // To calculate the right screensize, we should make sure the 
         // mode-related fields are updated if the mode_id has changed
-        for crtc in &mut new_crtcs {
+        for crtc in &mut new_enabled_crtcs {
             let mode = self.mode(crtc.mode)?;
             crtc.width = mode.width;
             crtc.height = mode.height;
