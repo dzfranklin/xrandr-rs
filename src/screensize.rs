@@ -1,6 +1,6 @@
-use x11::xlib;
-use crate::XHandle;
 use crate::crtc::Crtc;
+use crate::XHandle;
+use x11::xlib;
 
 // The amount of milimeters in an inch, needed for dpi calculation
 const INCH_MM: f32 = 25.4;
