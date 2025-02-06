@@ -1,10 +1,10 @@
-use itertools::EitherOrBoth as ZipEntry;
-use itertools::Itertools;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::os::raw::c_ulong;
 use std::ptr;
+use itertools::EitherOrBoth as ZipEntry;
+use itertools::Itertools;
 
 use crtc::normalize_positions;
 pub use indexmap;
@@ -15,11 +15,11 @@ use x11::{xlib, xrandr};
 pub use crate::crtc::Crtc;
 pub use crate::crtc::{Relation, Rotation};
 pub use crate::mode::Mode;
+pub use crate::screensize::ScreenSize;
 pub use crate::monitor::Monitor;
 use crate::monitor::MonitorHandle;
-pub use crate::screensize::ScreenSize;
 pub use output::{
-    property::{Property, Range, Ranges, Supported, Value, Values},
+    property::{Property, Value, Values, Range, Ranges, Supported},
     Output,
 };
 
@@ -233,6 +233,7 @@ impl XHandle {
         let mut crtc = ScreenResources::new(self)?.crtc(self, crtc_id)?;
 
         crtc.mode = mode.xid;
+        //Width and Height required by apply_new_crtcs to recalculate ScreenSize in fitting_crtcs
         crtc.height = mode.height;
         crtc.width = mode.width;
         self.apply_new_crtcs(&mut [crtc])
