@@ -3,8 +3,8 @@ use std::ffi::CStr;
 use std::fmt::Debug;
 use std::os::raw::c_ulong;
 use std::ptr;
-use itertools::EitherOrBoth as ZipEntry;
 use itertools::Itertools;
+use itertools::EitherOrBoth as ZipEntry;
 
 use crtc::normalize_positions;
 pub use indexmap;
@@ -13,7 +13,7 @@ use thiserror::Error;
 use x11::{xlib, xrandr};
 
 pub use crate::crtc::Crtc;
-pub use crate::crtc::{Relation, Rotation};
+pub use crate::crtc::{Rotation, Relation};
 pub use crate::mode::Mode;
 pub use crate::screensize::ScreenSize;
 pub use crate::monitor::Monitor;
