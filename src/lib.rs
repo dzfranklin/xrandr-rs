@@ -233,6 +233,9 @@ impl XHandle {
         let mut crtc = ScreenResources::new(self)?.crtc(self, crtc_id)?;
 
         crtc.mode = mode.xid;
+        //Width and Height required by apply_new_crtcs to recalculate ScreenSize in fitting_crtcs
+        crtc.height = mode.height;
+        crtc.width = mode.width;
         self.apply_new_crtcs(&mut [crtc])
     }
 
